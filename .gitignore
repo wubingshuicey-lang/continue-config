@@ -1,0 +1,12 @@
+# 包含 API Key 的文件 — 必须忽略
+config.yaml
+
+# 本地数据 / 缓存
+index/
+sessions/
+dev_data/
+
+# 本地设置
+.claude/
+.continuerc.json
+.vscode/
