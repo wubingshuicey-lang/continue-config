@@ -1,0 +1,22 @@
+{
+  "lastSelectedProfileForWorkspace": {
+    ":::personal": "local",
+    "file:///c%3A/Users/11756/.continue:::personal": "local"
+  },
+  "lastSelectedOrgIdForWorkspace": {
+    "": "personal",
+    "file:///c%3A/Users/11756/.continue": "personal"
+  },
+  "selectedModelsByProfileId": {
+    "local": {
+      "chat": "Gemini 3.1 Flash Lite",
+      "edit": "Gemini 2.5 Pro",
+      "apply": "Gemini 2.5 Pro",
+      "embed": "Transformers.js (Built-In)",
+      "autocomplete": null,
+      "rerank": null,
+      "summarize": null,
+      "subagent": null
+    }
+  }
+}
