@@ -200,6 +200,7 @@ body{font-family:var(--font-body);color:var(--brown-text);background-color:var(-
 .stat-mini .stat-fill{height:100%;border-radius:4px;background:var(--accent-rust);transition:width 0.5s;}
 .stat-fill.familiar{background:var(--khaki-deep);}.stat-fill.heart{background:#d4878a;}.stat-fill.depend{background:#b8a0d0;}.stat-fill.jealous{background:#e0a060;}
 .stage-badge-mini{display:inline-block;padding:3px 10px;background:rgba(180,130,100,0.25);border-radius:10px;font-size:.72rem;color:var(--accent-rust);margin-top:4px;text-align:center;width:100%;}
+.scenario-progress{text-align:center;font-size:.65rem;color:var(--brown-light);margin-top:4px;}
 .btn-next-week{width:100%;margin-top:8px;padding:8px 0;font-size:.75rem;color:var(--brown-light);background:transparent;border:1px dashed var(--glass-border);border-radius:10px;cursor:pointer;letter-spacing:.04em;transition:all 0.3s;}
 .btn-next-week:hover{color:var(--accent-rust);border-color:var(--accent-rust);}
 
