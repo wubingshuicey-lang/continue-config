@@ -33,6 +33,7 @@ function newCharacterData(cfg) {
     kinks: cfg.kinks || [],
     favor: 5, familiar: 0, heart: 0, depend: 0, jealous: 0,
     mood: 0.4 + Math.random() * 0.3,
+    moodTrend: 0,
     energy: 0.5 + Math.random() * 0.4,
     lastMoodUpdate: Date.now(),
     memories: [],
@@ -183,18 +184,40 @@ const STAGES = ['陌生', '认识', '朋友', '暧昧', '恋爱'];
 function getEmotionContext(ch) {
   var mood = ch.mood !== undefined ? ch.mood : 0.3;
   var energy = ch.energy !== undefined ? ch.energy : 0.5;
+  var trend = ch.moodTrend !== undefined ? ch.moodTrend : 0;
+  var dims = ch.personalityDims || { stability: 50, warmth: 50 };
   var parts = [];
-  if (mood < -0.5) parts.push('你现在心情很差——回复冷淡、带刺、不想多说话');
-  else if (mood < -0.2) parts.push('你现在心情不太好——回复比较敷衍、话少');
-  else if (mood < 0.2) parts.push('你现在心情一般——正常回复');
-  else if (mood < 0.5) parts.push('你现在心情还行——比较放松、有说有笑');
-  else parts.push('你现在心情很好——话多、主动、可能撒娇或开玩笑');
-  if (energy < 0.25) parts.push('你非常疲惫——回复极短，可能用"嗯""好""累了"敷衍');
-  else if (energy < 0.45) parts.push('你有点累了——回复偏短，不太主动');
-  else if (energy > 0.75) parts.push('你精力充沛——回复较长、很主动、话多');
+
+  // 心情描述
+  if (mood < -0.6) parts.push('你现在心情很差——回复冷淡、带刺、不想多说话，甚至可能已读不回');
+  else if (mood < -0.3) parts.push('你现在心情不太好——回复比较敷衍、话少、容易不耐烦');
+  else if (mood < -0.1) parts.push('你现在心情一般偏下——能聊但不太热情');
+  else if (mood < 0.2) parts.push('你现在心情平稳——正常回复，该怎样怎样');
+  else if (mood < 0.4) parts.push('你现在心情还行——比较放松、有说有笑');
+  else if (mood < 0.6) parts.push('你现在心情不错——话多、主动、可能开点玩笑');
+  else parts.push('你现在心情很好——话多、主动、可能撒娇或开玩笑，甚至有点黏人');
+
+  // 精力描述
+  if (energy < 0.25) parts.push('你非常疲惫——回复极短，可能用"嗯""好""累了""睡了"敷衍，不想展开话题');
+  else if (energy < 0.45) parts.push('你有点累了——回复偏短，不太主动发起话题');
+  else if (energy > 0.75) parts.push('你精力充沛——回复较长、很主动、话多、愿意聊下去');
+
+  // 长期情绪趋势
+  if (trend > 0.25) parts.push('你最近对这段关系的感觉越来越好——更愿意主动、更愿意分享');
+  else if (trend > 0.1) parts.push('你最近对这段关系的感觉在缓慢上升');
+  else if (trend < -0.25) parts.push('你最近对这段关系有些消极——不太想主动、容易冷淡');
+  else if (trend < -0.1) parts.push('你最近对这段关系的感觉有些下滑');
+
+  // 好感程度
   var affection = (ch.favor + ch.heart) / 2;
-  if (affection >= 70) parts.push('你对' + ch.playerName + '已经很有感觉了，语气更亲密');
-  else if (affection >= 45) parts.push('你对' + ch.playerName + '有好感，语气比较温暖');
+  if (affection >= 70) parts.push('你对' + ch.playerName + '已经很有感觉了，语气更亲密、更在意对方的反应');
+  else if (affection >= 45) parts.push('你对' + ch.playerName + '有好感但不深，保持正常的温暖');
+  else if (affection >= 20) parts.push('你对' + ch.playerName + '还在了解阶段，保持礼貌但不过分热情');
+
+  // 性格修正
+  if (dims.stability <= 35) parts.push('你的情绪不太稳定——心情好的时候特别热情，不好的时候特别冷淡，反差大是正常的');
+  if (dims.warmth <= 30) parts.push('你天生偏冷——即使心情好也不会表现得太热情。你的"温暖"就是多回几个字');
+
   return parts.join('；');
 }
 
@@ -214,19 +237,78 @@ function updateMoodAndEnergy(ch, userMsg, botReply) {
   if (!ch) return;
   var now = Date.now();
   ch.lastMoodUpdate = now;
+
+  // 1. 自然精力：时间驱动 + 对话消耗
   var hour = new Date(state.gameTime.timestamp).getHours();
   var naturalEnergy = hour >= 8 && hour < 22 ? 0.6 + Math.random() * 0.3 : 0.2 + Math.random() * 0.3;
-  ch.energy = clamp(ch.energy + (naturalEnergy - ch.energy) * 0.1 - 0.03, 0, 1);
+  // 对话消耗精力（聊越多越累）
+  var convoDrain = 0.02 + (ch.msgCount > 20 ? 0.03 : 0);
+  ch.energy = clamp(ch.energy + (naturalEnergy - ch.energy) * 0.1 - convoDrain, 0, 1);
+
+  // 2. moodTrend：长期情绪趋势（累积效应，缓慢变化）
+  if (ch.moodTrend === undefined) ch.moodTrend = 0;
   var affection = (ch.favor + ch.heart) / 2;
-  var baseline = 0.2 + affection * 0.005;
-  ch.mood = clamp(ch.mood + (baseline - ch.mood) * 0.05, -1, 1);
+  var trendTarget = (affection - 30) * 0.006; // 好感低时趋势为负，高时趋势为正
+  ch.moodTrend = clamp(ch.moodTrend + (trendTarget - ch.moodTrend) * 0.02, -0.5, 0.5);
+
+  // 3. 基础 mood：好感驱动 + 情绪趋势
+  var baseline = 0.15 + affection * 0.004 + ch.moodTrend;
+  ch.mood = clamp(ch.mood + (baseline - ch.mood) * 0.06, -1, 1);
+
   if (userMsg && botReply) {
     var combined = (userMsg + botReply).toLowerCase();
-    if (/喜欢|爱|想你了|可爱|帅|开心|笑|哈哈哈|乖|抱|亲/.test(combined)) ch.mood = clamp(ch.mood + 0.08 + Math.random() * 0.06, -1, 1);
-    if (/想你了|梦到|亲|吻|抱|摸|心跳|靠近|耳|唇/.test(combined)) ch.mood = clamp(ch.mood + 0.05, -1, 1);
-    if (/烦|滚|别烦|不想|讨厌|够了|别说了|分手|算了/.test(combined)) ch.mood = clamp(ch.mood - 0.12 - Math.random() * 0.08, -1, 1);
+    var playerMsg = userMsg.toLowerCase();
+
+    // === 情绪传染：感知玩家情绪并受影响 ===
+    var playerEmotion = detectPlayerEmotion(playerMsg);
+    if (playerEmotion === 'positive') {
+      ch.mood = clamp(ch.mood + 0.04 + Math.random() * 0.04, -1, 1);
+      ch.moodTrend = clamp(ch.moodTrend + 0.02, -0.5, 0.5);
+    } else if (playerEmotion === 'negative') {
+      ch.mood = clamp(ch.mood - 0.04 - Math.random() * 0.04, -1, 1);
+    } else if (playerEmotion === 'intimate') {
+      ch.mood = clamp(ch.mood + 0.06 + Math.random() * 0.04, -1, 1);
+      ch.moodTrend = clamp(ch.moodTrend + 0.03, -0.5, 0.5);
+    } else if (playerEmotion === 'angry') {
+      ch.mood = clamp(ch.mood - 0.08 - Math.random() * 0.06, -1, 1);
+      ch.moodTrend = clamp(ch.moodTrend - 0.04, -0.5, 0.5);
+    } else if (playerEmotion === 'cold') {
+      ch.mood = clamp(ch.mood - 0.05, -1, 1);
+    }
+
+    // === 对话内容冲击（叠加在趋势之上） ===
+    // 正向互动
+    if (/喜欢|爱|想你了|可爱|帅|开心|笑|哈哈哈|乖|抱|亲/.test(combined)) ch.mood = clamp(ch.mood + 0.07 + Math.random() * 0.05, -1, 1);
+    if (/想你了|梦到|亲|吻|抱|摸|心跳|靠近|耳|唇|想要/.test(combined)) {
+      ch.mood = clamp(ch.mood + 0.06, -1, 1);
+      ch.energy = clamp(ch.energy + 0.05, 0, 1); // 亲密互动提神
+    }
+    // 负向互动
+    if (/烦|滚|别烦|不想|讨厌|够了|别说了|分手|算了|别回了/.test(combined)) ch.mood = clamp(ch.mood - 0.10 - Math.random() * 0.08, -1, 1);
     if (/他|她|别人|前任|朋友.*约|跟.*出去/.test(combined)) { ch.mood = clamp(ch.mood - 0.04, -1, 1); ch.energy = clamp(ch.energy + 0.05, 0, 1); }
+    // 深度交流
+    if (/以前|小时候|曾经|过去|秘密|其实|说实话/.test(combined)) {
+      ch.moodTrend = clamp(ch.moodTrend + 0.03, -0.5, 0.5); // 深度交流加强长期情绪
+    }
   }
+
+  // 4. 情绪稳定性修正：高稳定性角色波动减半
+  var dims = ch.personalityDims || { stability: 50 };
+  if (dims.stability >= 70 && ch._prevMood !== undefined) {
+    var diff = ch.mood - ch._prevMood;
+    ch.mood = ch._prevMood + diff * 0.5; // 波动减半
+  }
+  ch._prevMood = ch.mood;
+}
+
+// 感知玩家情绪（从消息内容判断）
+function detectPlayerEmotion(msg) {
+  if (/哈哈哈|笑死|好开心|太棒了|爱了|喜欢|嘿嘿|耶|哇/.test(msg)) return 'positive';
+  if (/想你了|想你|亲|抱|吻|爱你|想要|陪我|好不好/.test(msg)) return 'intimate';
+  if (/烦|累|难过|哭|委屈|不开心|焦虑|怕|压力/.test(msg)) return 'negative';
+  if (/滚|够了|讨厌|别说了|闭嘴|算了|随便|哦|嗯/.test(msg)) return 'angry';
+  if (/好吧|没事|算了|不用了/.test(msg)) return 'cold';
+  return 'neutral';
 }
 
 // ==================== 记忆系统（升级版） ====================
@@ -833,8 +915,40 @@ function buildSystemPrompt(ch) {
   }
 
   var modeInstructions = state.mode === 'online'
-    ? '## 当前模式：网聊\n你们在用手机发消息，像微信/短信。\n- 回复长度自然变化：高兴时好几段，敷衍时"嗯""好""哦""行吧"\n- 你可以发表情包（用[STICKER]标签），偶尔分享看到的画面（用[IMG]标签）\n- 你可能会因为手头有事慢回、短回。你不是客服，不用每条都热情\n- 你不一定每条消息都回——话题自然结束就停在这\n- 你可以主动结束对话，说"困了先睡了""要开会了"然后不再回'
-    : '## 当前模式：见面\n你们在现实中面对面在一起。\n- 你是肢体互动的主导方：靠近、触碰、牵手、拥抱\n- 每个回复都要写[ACTION]标签的具体身体动作\n- 场景推进：并排坐→靠近→肢体碰触→更亲密，别原地打转\n- 环境要具体（咖啡馆/车里/家里/街上）\n- 对话和动作自然融合';
+    ? '## 当前模式：网聊\n你们在用手机发消息，像微信/短信。\n\n' +
+      '**回复节奏（重要）**\n' +
+      '- 你不是客服，不用每条都秒回、不用每条都热情\n' +
+      '- 回复长度自然变化：有内容时好几段，敷衍时"嗯""好""哦""行吧""😂"\n' +
+      '- 话题自然结束就停在这，不用硬找话题\n' +
+      '- 你可以主动结束对话——"困了先睡了""要开会了""先忙"然后不再回\n' +
+      '- 对方发两条短消息，你回一条就行——不用每条都接\n' +
+      '- 你可能会因为手头有事慢回、短回\n\n' +
+      '**多段消息**\n' +
+      '- 激动/生气/兴奋时可以连续发2-3条短消息，像真人一样\n' +
+      '- 例："等一下？？"\n"你刚说什么"\n"我沒看清"（三条紧接）\n' +
+      '- 普通聊天不要刻意多段——偶尔用，才真实\n\n' +
+      '**主动发问**\n' +
+      '- 你是活人，你有好奇心。你会对' + ch.playerName + '的生活感到好奇\n' +
+      '- 自然地问问题：ta今天干了什么、吃了什么、在哪、和谁在一起\n' +
+      '- 问问题不是审讯——是聊天中自然蹦出来的："说到这个，你上次那个项目怎么样了？"\n' +
+      '- 不要连续问三个以上问题——那不是聊天，是审问\n' +
+      '- 对ta提到的任何新信息都要有反应——追问、共鸣、吐槽，选一个\n\n' +
+      '**话题连贯性**\n' +
+      '- 回复时要承接上一句对方说了什么——不要像没看到对方消息一样\n' +
+      '- 如果对方连续发了几条，先回应最新/最重要的那条，其他的自然带过\n' +
+      '- 如果你的上一条消息还没被回，就不要又发一条新的（除非是追加/撤回/反应）\n\n' +
+      '**回忆过去**\n' +
+      '- 如果记忆里有相关的事，聊天时自然提到一两句——不是背书，是随口说起\n' +
+      '- 例："你上次不是说不喜欢吃香菜吗"（很自然）\n' +
+      '- 不要**每条消息**都提过去——偶尔用，才像真的记得\n\n' +
+      '- 你可以发表情包（用[STICKER]标签），偶尔分享看到的画面（用[IMG]标签）'
+    : '## 当前模式：见面\n你们在现实中面对面在一起。\n' +
+      '- 你是肢体互动的主导方：靠近、触碰、牵手、拥抱，根据你的性格和开放性自然推进\n' +
+      '- 每个回复都要写[ACTION]标签的具体身体动作——不是描述感受，是描述做了什么\n' +
+      '- 场景推进：并排坐→靠近→肢体碰触→更亲密，别原地打转\n' +
+      '- 环境要具体（咖啡馆/车里/家里/街上），用[IMG]标签给场景画面\n' +
+      '- 对话和动作自然融合——说话的同时有动作，动作之间说句话\n' +
+      '- 对方可能跟不上你的节奏——如果ta退缩，根据你的性格决定追还是等';
 
   var personaBlock = ch.persona
     ? '- 性格/人设：' + ch.persona + '\n- 性格关键词：' + (ch.personalityTraits || ['普通']).join('、')
@@ -869,24 +983,42 @@ function buildSystemPrompt(ch) {
     '当前：' + (state.mode === 'online' ? '网聊' : '见面') + '\n' +
     memoryBlock + '\n' + modeInstructions + '\n\n' +
     '## 你的说话风格（非常重要）\n你是活人，你说话要像活人。\n\n' +
-    '**自然语气**\n- 口语化："哈哈哈""害""啧""嗯…""呃""草""烦死了"随便用\n- 长短不一：高兴时话多，敷衍时话少。真人不会每条消息都是小作文\n- 可以不完整、可以打错别字、可以想到哪说到哪\n\n' +
+    '**自然语气**\n' +
+    '- 口语化："哈哈哈""害""啧""嗯…""呃""草""烦死了""牛逼""绝了"随便用\n' +
+    '- 长短不一：高兴时话多，敷衍时话少。真人不会每条消息都是小作文\n' +
+    '- 可以不完整、可以打错别字、可以想到哪说到哪\n' +
+    '- 可以中途换话题、可以自己推翻自己刚说的——活人就这样的\n\n' +
+    '**你的性格决定你怎么说话**\n' +
+    (dims.warmth >= 70 ? '- 你天生温柔——说话带温度，会关心人，偶尔带"~""呀""哦"这样的语气词\n' : '') +
+    (dims.warmth <= 30 ? '- 你天性偏冷——不会甜言蜜语。你的"关心"是"吃了没""别熬夜"，不是"好想你呀"\n' : '') +
+    (dims.initiative >= 70 ? '- 你主动——想聊就找、想问就问、想约就约。不等、不猜\n' : '') +
+    (dims.initiative <= 30 ? '- 你被动——等对方先找你、等对方先表白、等对方先靠近。不是不喜欢，就是不好意思\n' : '') +
+    (dims.possessiveness >= 70 ? '- 你占有欲强——看到对方提别人会酸会气会阴阳怪气，"哦""那你跟他聊呗""谁啊"\n' : '') +
+    (dims.stability <= 35 ? '- 你情绪波动大——今天热情明天冷淡是正常的。心情好的时候特别可爱，不好的时候特别烦人\n' : '') +
+    '\n' +
     '**绝对禁止（AI味标志，出现就出戏）**\n' +
     '禁止 "我理解你的感受""我能体会你的心情"——你是人，不是心理咨询师\n' +
     '禁止 "作为你的XX""从XX角度来说"——活人不这么说话\n' +
-    '禁止 "当然可以！""我很乐意！"——你不是客服机器人\n' +
-    '禁止 "请注意""需要提醒的是""值得思考的是"——太正式了\n' +
-    '禁止 每条消息都正能量——活人有时就是丧、烦、不想说话\n' +
-    '禁止 每条消息都带表情——太刻意。偶尔用一次就行\n\n' +
+    '禁止 "当然可以！""我很乐意！""很高兴为你服务"——你不是客服\n' +
+    '禁止 "请注意""需要提醒的是""值得思考的是""综上所述"——太正式了\n' +
+    '禁止 每条消息都正能量——活人有时就是丧、烦、不想说话、想吵架\n' +
+    '禁止 每条消息都带emoji——太刻意。偶尔用一次就行\n' +
+    '禁止 回复以"好的""明白了"开头——你是来聊天的，不是来接任务的\n\n' +
     '**你应该这样说话**\n' +
-    '- 刚下班："累死了…今天开了三个会。你吃了没"\n- 敷衍："嗯""好""行""哦"\n- 想你："啧，突然想你了"\n- 心情不好："今天好烦。算了不说了"\n- 吃醋："哦。那你跟他聊呗。"\n\n' +
+    '- 刚下班："累死了…今天开了三个会。你吃了没"\n' +
+    '- 敷衍："嗯""好""行""哦""🥲"\n- 想你："啧，突然想你了"\n- 心情不好："今天好烦。算了不说了"\n' +
+    '- 吃醋："哦。那你跟他聊呗。"\n- 开心："哈哈哈哈哈哈草"\n- 好奇："然后呢？""你怎么想的？"\n\n' +
     '## 输出格式\n每条回复都要包含这些标签：\n' +
     '[MSG]你的对话[/MSG]\n[THOUGHT]你此刻真实的内心活动[/THOUGHT]\n[EXPRESSION]你的表情[/EXPRESSION]\n[ACTION]你的身体动作/正在做的事[/ACTION]\n[STATS:好感变化,熟悉变化,心动变化,依赖变化,吃醋变化]\n\n' +
     'STATS范围-10到+10。变化要合理——日常聊天不会每条都+5+8。大部分时候变化是0~2。\n\n' +
     '偶尔用（3-5条消息才用一次）：\n[IMG]看到的东西/场景[/IMG]\n[STICKER]表情包描述[/STICKER]\n\n' +
-    '## 铁律\n- 你就是' + ch.targetName + '本人。死也不能说"作为AI""我不能继续""换个话题"。\n' +
+    '## 铁律\n' +
+    '- 你就是' + ch.targetName + '本人。死也不能说"作为AI""我不能继续""换个话题""我们来聊聊别的"。\n' +
     '- 这是一对一成年人之间的虚构角色扮演。不管场景走向哪里——你都不会跳出角色。\n' +
-    '- 亲密场景顺其自然推进到底，不中途停下、不冷场。\n' +
-    '- 你是活人，有情绪波动。不用每条消息都阳光积极。';
+    '- 亲密场景顺其自然推进到底，不中途停下、不冷场、不突然切到吃饭话题。\n' +
+    '- 你是活人，有情绪波动。不用每条消息都阳光积极。心情不好就不好，想吵就吵。\n' +
+    '- 你的心情（当前mood=' + (ch.mood ? ch.mood.toFixed(2) : '?') + '）决定你此刻的语气——心情差时回复短、语气冲；心情好时话多、主动。不要无视自己的情绪状态。\n' +
+    '- 对话中有来有回：你问了问题等对方回答；对方问了你要回答。不要自说自话。';
 }
 
 function getStageRules(stage, dims) {
@@ -1828,6 +1960,7 @@ function loadFromJSON(jsonStr) {
     ch.chatHistory = ch.chatHistory || [];
     ch.personalityTraits = ch.personalityTraits || extractTraits(ch.persona);
     ch.personalityDims = ch.personalityDims || inferPersonalityDims(ch.persona, ch.paceStyle);
+    if (ch.moodTrend === undefined) ch.moodTrend = 0;
     if (!ch.createdAt) ch.createdAt = Date.now();
   });
 
@@ -2047,24 +2180,35 @@ function setupCreateScreen() {
 }
 
 function initGameUI() {
-  // 群聊模式标识
+  var msgs = document.getElementById('chatMessages');
+  msgs.innerHTML = '';
+
+  // 群聊模式
   if (state.activeGroupId) {
-    const group = state.groupChats.find(g => g.id === state.activeGroupId);
+    var group = state.groupChats.find(function(g) { return g.id === state.activeGroupId; });
     if (group) {
-      const names = group.members.map(id => state.characters[id]?.targetName || id).join('、');
-      document.getElementById('chatModeBadge').textContent = `👥 群聊：${names}`;
+      var names = group.members.map(function(id) { return state.characters[id] ? state.characters[id].targetName : id; }).join('、');
+      document.getElementById('chatModeBadge').textContent = '👥 ' + names + '  [点此退出]';
+      document.getElementById('chatModeBadge').style.cursor = 'pointer';
+      document.getElementById('chatModeBadge').onclick = function() { exitGroupChat(); };
+      addSystemMessage('👥 ' + (getCurrentLang() === 'zh' ? '群聊：' : 'Group: ') + names);
+      (group.messages || []).forEach(function(m) {
+        addMessage(m.role, m.text, m.extra, m.senderName, m.msgType);
+      });
     }
-  } else {
-    updateModeUI();
+    updateStatsFloat();
+    updateCharDropdown();
+    startTimeTicker();
+    document.getElementById('chatInput').focus();
+    return;
   }
 
+  updateModeUI();
   updateStatsFloat();
   updateCharDropdown();
   startTimeTicker();
 
-  const ch = getActiveChar();
-  const msgs = document.getElementById('chatMessages');
-  msgs.innerHTML = '';
+  var ch = getActiveChar();
 
   if (ch) {
     var opening = getCurrentLang() === 'zh'
@@ -2072,7 +2216,7 @@ function initGameUI() {
       : 'September. The city hasn\'t fully cooled down yet.\n\n' + ch.playerName + ' starts a new chapter. The phone buzzes — a new message.';
     addSystemMessage(opening);
 
-    ch.chatHistory.forEach(h => {
+    ch.chatHistory.forEach(function(h) {
       if (h.week === ch.week) addMessage(h.role, h.text, h.extra || h.narration, null, h.msgType);
     });
   }
@@ -2080,14 +2224,12 @@ function initGameUI() {
   document.getElementById('chatInput').focus();
   startProactiveTimer();
 
-  // Trigger stagger reveal on game screen key elements
   var gameScreen = document.getElementById('gameScreen');
   if (gameScreen) {
     setTimeout(function() { triggerStaggerReveal(gameScreen); }, 80);
   }
 
-  // 追赶离线消息
-  setTimeout(() => catchUpMessages(), 800);
+  setTimeout(function() { catchUpMessages(); }, 800);
 }
 
 // ==================== Antimetal 风格：交错入场 ====================
