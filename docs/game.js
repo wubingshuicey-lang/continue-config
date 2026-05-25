@@ -815,15 +815,17 @@ async function sendMessage() {
       ch.chatHistory.push({ role: 'target', text: cleanMsg, extra, week: ch.week });
 
       ch._readNoReply = false;
+      postMessageProcess(ch, cleanMsg);
+      updateStatsFloat();
+      saveGame();
     } catch (err) {
       if (_replyGate !== myGate) return;
       showTyping(false);
       addSystemMessage('❌ ' + err.message);
+      updateStatsFloat();
+      saveGame();
     }
 
-    postMessageProcess(ch, cleanMsg);
-    updateStatsFloat();
-    saveGame();
     setSendEnabled(true);
     document.getElementById('chatInput').focus();
     return;
@@ -1164,24 +1166,6 @@ function saveGame() {
 
   const json = JSON.stringify(data, null, 2);
   localStorage.setItem(SAVE_KEY, json);
-
-  // 自动下载 save.json（每30秒最多触发一次，避免频繁下载）
-  const now = Date.now();
-  if (!saveGame._lastDownload || now - saveGame._lastDownload > 30000) {
-    saveGame._lastDownload = now;
-    try {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'save.json';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch(e) { /* 静默失败，不影响游戏 */ }
-  }
 }
 
 function loadFromJSON(jsonStr) {
@@ -1582,8 +1566,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // === 存档导出 ===
   document.getElementById('btnExport').addEventListener('click', () => {
-    saveGame._lastDownload = 0; // 允许立即下载
     saveGame();
+    const json = localStorage.getItem(SAVE_KEY);
+    if (json) {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'save.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
     addSystemMessage('📥 存档已导出（浏览器下载了 save.json）');
   });
 
