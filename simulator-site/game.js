@@ -98,7 +98,7 @@ function analyzeMessageImpact(text, ch) {
 // ==================== 工具函数 ====================
 function getActiveChar() { return state.activeCharId ? state.characters[state.activeCharId] : null; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function rpick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function rpick(arr) { if (!arr || !arr.length) return ''; return arr[Math.floor(Math.random() * arr.length)]; }
 function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
 
 function getStage(ch) {
@@ -182,17 +182,17 @@ function updateStatsFloat() {
   const ch = getActiveChar();
   if (!ch) return;
 
-  document.getElementById('statsFloatName').textContent = ch.targetName;
-  document.getElementById('statFavor').style.width = ch.favor + '%';
-  document.getElementById('statFamiliar').style.width = ch.familiar + '%';
-  document.getElementById('statHeart').style.width = ch.heart + '%';
-  document.getElementById('statDepend').style.width = ch.depend + '%';
-  document.getElementById('statJealous').style.width = ch.jealous + '%';
+  document.getElementById('statsFloatName').textContent = ch.targetName || '';
+  document.getElementById('statFavor').style.width = (ch.favor || 0) + '%';
+  document.getElementById('statFamiliar').style.width = (ch.familiar || 0) + '%';
+  document.getElementById('statHeart').style.width = (ch.heart || 0) + '%';
+  document.getElementById('statDepend').style.width = (ch.depend || 0) + '%';
+  document.getElementById('statJealous').style.width = (ch.jealous || 0) + '%';
   document.getElementById('stageBadge').textContent = getStage(ch);
-  document.getElementById('scenarioProgress').textContent = `🏆 剧情节点 ${ch.completedScenarios.length}/${SCENARIOS.length}`;
+  document.getElementById('scenarioProgress').textContent = `🏆 剧情节点 ${(ch.completedScenarios || []).length}/${SCENARIOS.length}`;
 
-  document.getElementById('weekLabel').textContent = `第${ch.week}周`;
-  document.getElementById('currentCharName').textContent = ch.targetName;
+  document.getElementById('weekLabel').textContent = `第${ch.week || 1}周`;
+  document.getElementById('currentCharName').textContent = ch.targetName || '';
   updateTimeDisplay();
 }
 
@@ -1143,19 +1143,19 @@ function getTimeBucket() {
 function pickOfflineMsg(ch) {
   const bucket = OFFLINE_MSGS[getTimeBucket()] || OFFLINE_MSGS['daytime'];
   const stage = getStage(ch);
-  // 越亲密越可能从更高阶段抽消息
-  const pool = bucket[stage] || bucket['认识'];
+  const pool = bucket[stage] || bucket['认识'] || ['在吗？'];
   return rpick(pool);
 }
 
 async function catchUpMessages() {
+  try {
   const now = Date.now();
   const elapsed = now - state.lastActiveTime;
   const elapsedMin = Math.floor(elapsed / 60000);
 
   if (elapsedMin < 10) {
     state.lastActiveTime = now;
-    return; // 不到 10 分钟不管
+    return;
   }
 
   state.lastActiveTime = now;
@@ -1236,6 +1236,7 @@ async function catchUpMessages() {
       } catch(e) {}
     }, 5000);
   }
+  } catch(e) { console.error('catchUpMessages:', e); }
 }
 
 // ==================== 周推进 ====================
@@ -1780,16 +1781,47 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        loadFromJSON(raw);
+        JSON.parse(raw); // 验证 JSON
+      } catch (err) {
+        alert('文件不是有效的 JSON：' + err.message);
+        return;
+      }
+
+      try {
+        if (!loadFromJSON(raw)) throw new Error('数据加载失败');
+      } catch (err) {
+        alert('步骤1-加载数据失败：' + err.message);
+        return;
+      }
+
+      try {
         localStorage.setItem(SAVE_KEY, raw);
+      } catch (err) {
+        alert('步骤2-写入缓存失败：' + err.message);
+        return;
+      }
+
+      try {
         document.getElementById('landingPage').classList.add('hidden');
         document.getElementById('createScreen').classList.add('hidden');
         document.getElementById('gameScreen').classList.remove('hidden');
+      } catch (err) {
+        alert('步骤3-切换界面失败：' + err.message);
+        return;
+      }
+
+      try {
         initGameUI();
+      } catch (err) {
+        alert('步骤4-初始化游戏失败：' + err.message + '\n请截图发给开发者');
+        console.error(err);
+        return;
+      }
+
+      try {
         addSystemMessage('📤 存档已导入成功！');
       } catch (err) {
-        console.error(err);
-        alert('导入失败：' + err.message);
+        // 非关键错误，忽略
       }
     };
     reader.readAsText(file);
