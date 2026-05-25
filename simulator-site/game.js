@@ -972,7 +972,8 @@ async function sendGroupMessage(text) {
       }
 
       ch.msgCount++;
-      ch.chatHistory.push({ role: 'target', text: cleanMsg, extra, week: ch.week });
+      // 群聊消息只存群聊，不污染个人聊天记录
+      group.messages.push({ role: 'target', text: cleanMsg, extra, senderId: memberId, time: Date.now() });
 
       // 短暂延迟再让下一个人回复
       await new Promise(r => setTimeout(r, 600 + Math.random() * 400));
@@ -1594,6 +1595,9 @@ function initGameUI() {
     if (group) {
       const names = group.members.map(id => state.characters[id]?.targetName || id).join('、');
       document.getElementById('chatModeBadge').textContent = `👥 群聊：${names}`;
+      document.getElementById('chatModeBadge').style.display = '';
+      document.getElementById('chatModeBadge').style.cursor = 'pointer';
+      document.getElementById('chatModeBadge').onclick = () => exitGroupChat();
     }
   } else {
     updateModeUI();
@@ -1614,6 +1618,21 @@ function initGameUI() {
     ch.chatHistory.forEach(h => {
       if (h.week === ch.week) addMessage(h.role, h.text, h.extra || h.narration, null, h.msgType);
     });
+  } else if (state.activeGroupId) {
+    // 渲染群聊历史消息
+    const group = state.groupChats.find(g => g.id === state.activeGroupId);
+    if (group) {
+      const names = group.members.map(id => state.characters[id]?.targetName || id).join('、');
+      addSystemMessage(`👥 群聊：${names}`);
+      group.messages.forEach(m => {
+        if (m.role === 'player') {
+          addMessage('player', m.text);
+        } else {
+          const senderName = state.characters[m.senderId]?.targetName || '';
+          addMessage('target', m.text, m.extra, senderName);
+        }
+      });
+    }
   }
 
   document.getElementById('chatInput').focus();
