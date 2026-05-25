@@ -50,6 +50,7 @@
   <!-- ====== 角色创建 ====== -->
   <div class="game-container hidden" id="createScreen">
     <div class="glass-card create-card">
+      <button class="create-back" id="btnCreateBack">← 返回</button>
       <p class="subtitle">创建一个新角色</p>
       <h2>这次想攻略谁？</h2>
 
@@ -59,7 +60,19 @@
       </div>
 
       <div class="create-section">
-        <label>职业</label>
+        <label>你的性别</label>
+        <div class="choice-grid" id="playerGender">
+          <button class="glass-chip" data-value="女">女</button>
+          <button class="glass-chip" data-value="男">男</button>
+          <button class="glass-chip" data-value="非二元">非二元</button>
+          <button class="glass-chip" data-value="跨性别女">跨性别女</button>
+          <button class="glass-chip" data-value="跨性别男">跨性别男</button>
+          <button class="glass-chip" data-value="双性">双性</button>
+        </div>
+      </div>
+
+      <div class="create-section">
+        <label>你的职业</label>
         <div class="choice-grid" id="playerJob">
           <button class="glass-chip" data-value="设计师">设计师</button>
           <button class="glass-chip" data-value="摄影师">摄影师</button>
@@ -68,12 +81,26 @@
           <button class="glass-chip" data-value="咖啡店店主">咖啡店店主</button>
           <button class="glass-chip" data-value="老师">老师</button>
           <button class="glass-chip" data-value="自由职业">自由职业</button>
+          <button class="glass-chip" data-value="__custom__">✎ 自定义…</button>
         </div>
+        <input type="text" class="glass-input hidden" id="playerJobCustom" placeholder="输入你的职业…" maxlength="20" style="margin-top:8px;">
       </div>
 
       <div class="create-section">
         <label>攻略对象名字</label>
         <input type="text" class="glass-input" id="targetNameInput" placeholder="自定义或留空随机生成…" maxlength="8">
+      </div>
+
+      <div class="create-section">
+        <label>攻略对象性别</label>
+        <div class="choice-grid" id="targetGender">
+          <button class="glass-chip" data-value="男">男</button>
+          <button class="glass-chip" data-value="女">女</button>
+          <button class="glass-chip" data-value="非二元">非二元</button>
+          <button class="glass-chip" data-value="跨性别男">跨性别男</button>
+          <button class="glass-chip" data-value="跨性别女">跨性别女</button>
+          <button class="glass-chip" data-value="双性">双性</button>
+        </div>
       </div>
 
       <div class="create-section">
@@ -86,7 +113,45 @@
           <button class="glass-chip" data-value="总监">总监</button>
           <button class="glass-chip" data-value="大学老师">大学老师</button>
           <button class="glass-chip" data-value="程序员">程序员</button>
+          <button class="glass-chip" data-value="__custom__">✎ 自定义…</button>
         </div>
+        <input type="text" class="glass-input hidden" id="targetJobCustom" placeholder="输入攻略对象的职业…" maxlength="20" style="margin-top:8px;">
+      </div>
+
+      <div class="create-section">
+        <label>攻略对象性格/人设（自定义，留空用默认）</label>
+        <textarea class="glass-input persona-input" id="targetPersona" placeholder="例如：高冷毒舌但心软的外科医生，工作狂，不喜欢甜食，有一只猫叫年糕…" maxlength="300"></textarea>
+      </div>
+
+      <div class="create-section">
+        <label>性偏好 / XP（可多选）</label>
+        <div class="choice-grid multi-select" id="targetKinks">
+          <button class="glass-chip" data-value="温柔系">温柔系</button>
+          <button class="glass-chip" data-value="粗暴系">粗暴系</button>
+          <button class="glass-chip" data-value="言语羞辱">言语羞辱</button>
+          <button class="glass-chip" data-value="束缚">束缚</button>
+          <button class="glass-chip" data-value="支配者">支配者</button>
+          <button class="glass-chip" data-value="被支配">被支配</button>
+          <button class="glass-chip" data-value="亲吻狂魔">亲吻狂魔</button>
+          <button class="glass-chip" data-value="舔">舔</button>
+          <button class="glass-chip" data-value="咬/印记">咬/印记</button>
+          <button class="glass-chip" data-value="窒息">窒息</button>
+          <button class="glass-chip" data-value="角色扮演">角色扮演</button>
+          <button class="glass-chip" data-value="野外/车里">野外/车里</button>
+          <button class="glass-chip" data-value="浴室">浴室</button>
+          <button class="glass-chip" data-value="制服">制服</button>
+          <button class="glass-chip" data-value="年上控">年上控</button>
+          <button class="glass-chip" data-value="年下控">年下控</button>
+          <button class="glass-chip" data-value="酒后">酒后</button>
+          <button class="glass-chip" data-value="半推半就">半推半就</button>
+          <button class="glass-chip" data-value="强制">强制</button>
+          <button class="glass-chip" data-value="偷窥/偷拍">偷窥/偷拍</button>
+          <button class="glass-chip" data-value="公开场合">公开场合</button>
+          <button class="glass-chip" data-value="撒娇">撒娇</button>
+          <button class="glass-chip" data-value="哭">哭</button>
+          <button class="glass-chip" data-value="玩具">玩具</button>
+        </div>
+        <input type="text" class="glass-input" id="targetKinksCustom" placeholder="自定义 XP，用逗号分隔…" maxlength="200" style="margin-top:8px;">
       </div>
 
       <div class="create-section">
@@ -113,6 +178,7 @@
         <span class="char-selector-name" id="currentCharName">攻略对象</span>
         <span class="char-selector-arrow">▾</span>
         <div class="char-dropdown glass-card hidden" id="charDropdown"></div>
+        <div class="char-tooltip hidden" id="charTooltip"></div>
       </div>
 
       <span class="week-label" id="weekLabel">第1周</span>
@@ -123,8 +189,12 @@
         <button class="icon-btn" id="btnSearch" title="搜索聊天记录">🔍</button>
         <button class="icon-btn" id="btnCreateChar" title="创建新角色">＋</button>
         <button class="icon-btn" id="btnGroupChat" title="创建群聊">👥</button>
+        <button class="icon-btn" id="btnExport" title="导出存档">📥</button>
+        <button class="icon-btn" id="btnImport" title="导入存档">📤</button>
+        <button class="icon-btn" id="btnSync" title="云端同步">🔄</button>
         <button class="icon-btn" id="btnSettings" title="API 设置">⚙</button>
         <button class="theme-toggle" id="themeToggle2"><span class="toggle-icon">☾</span></button>
+        <input type="file" id="importFileInput" accept=".json" style="display:none">
       </div>
     </div>
 
@@ -145,9 +215,14 @@
           <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
         </div>
         <div class="chat-input-row">
+          <button class="input-tool-btn" id="btnEmoji" title="表情">😊</button>
+          <button class="input-tool-btn" id="btnImage" title="图片">🖼</button>
+          <button class="input-tool-btn" id="btnVoice" title="语音">🎤</button>
           <textarea class="chat-input glass-input" id="chatInput" placeholder="输入消息…" rows="1"></textarea>
           <button class="btn-send" id="btnSend">发送</button>
+          <input type="file" id="imageInput" accept="image/*" style="display:none">
         </div>
+        <div class="emoji-picker hidden" id="emojiPicker"></div>
       </div>
     </div>
 
