@@ -450,6 +450,42 @@ function setupGroupModal() {
   list.innerHTML = '';
   const selected = new Set();
 
+  // 显示已有群聊
+  if (state.groupChats.length > 0) {
+    const existingLabel = document.createElement('div');
+    existingLabel.style.fontSize = '0.8rem';
+    existingLabel.style.color = 'var(--brown-light)';
+    existingLabel.style.marginBottom = '8px';
+    existingLabel.textContent = '已有群聊（点击进入）：';
+    list.appendChild(existingLabel);
+
+    state.groupChats.forEach(g => {
+      const names = g.members.map(id => state.characters[id]?.targetName || id).join('、');
+      const div = document.createElement('div');
+      div.className = 'char-dropdown-item';
+      div.style.color = 'var(--accent, #c8a96e)';
+      div.style.cursor = 'pointer';
+      div.textContent = `👥 ${names} (${g.messages.length}条消息)`;
+      div.addEventListener('click', () => {
+        document.getElementById('groupModal').classList.add('hidden');
+        switchToGroup(g.id);
+      });
+      list.appendChild(div);
+    });
+
+    const divider = document.createElement('div');
+    divider.style.borderTop = '1px solid var(--border)';
+    divider.style.margin = '12px 0';
+    list.appendChild(divider);
+  }
+
+  const createLabel = document.createElement('div');
+  createLabel.style.fontSize = '0.8rem';
+  createLabel.style.color = 'var(--brown-light)';
+  createLabel.style.marginBottom = '8px';
+  createLabel.textContent = '选择成员创建新群聊：';
+  list.appendChild(createLabel);
+
   Object.values(state.characters).forEach(ch => {
     const chip = document.createElement('button');
     chip.className = 'group-char-chip';
