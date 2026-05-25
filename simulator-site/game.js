@@ -564,8 +564,8 @@ async function callApi(userMessage, ch) {
   const model = config.apiModel || getDefaultModel(provider);
   const systemPrompt = buildSystemPrompt(ch);
 
-  // heavy/fast 模式提高 temperature 帮助突破审查
-  const temps = { heavy: 1.3, fast: 1.1, moderate: 0.95, slow: 0.85 };
+  // temperature：高模式略高但不至于发癫
+  const temps = { heavy: 1.0, fast: 0.95, moderate: 0.9, slow: 0.8 };
   const temperature = temps[ch.paceStyle] || 0.9;
 
   let messages = [{ role: 'system', content: systemPrompt }];
@@ -605,6 +605,21 @@ async function callApi(userMessage, ch) {
   if (provider === 'gemini') return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   if (provider === 'claude') return data.content?.[0]?.text || '';
   return data.choices?.[0]?.message?.content || '';
+}
+
+// 检测 AI 回复是否明显乱码
+function isReplyGarbled(text) {
+  if (!text || text.length < 3) return true;
+  // 标签都没闭合
+  const tags = ['MSG', 'THOUGHT', 'EXPRESSION', 'ACTION'];
+  let closed = 0;
+  tags.forEach(t => { if (text.includes('[/' + t + ']')) closed++; });
+  if (closed < 3) return true;
+  // 含大量非中文字符且超过 60% 是无意义片段
+  const chineseChars = (text.match(/[一-鿿]/g) || []).length;
+  const total = text.length;
+  if (total > 200 && chineseChars / total < 0.3) return true;
+  return false;
 }
 
 function parseReply(text) {
@@ -785,9 +800,13 @@ async function sendMessage() {
       if (_replyGate !== myGate) return;
 
       let parsed = parseReply(reply);
-      if (!parsed.hasFormat) {
+
+      // 重试：格式不对 或 明显乱码
+      let retries = 0;
+      while ((!parsed.hasFormat || isReplyGarbled(reply)) && retries < 2) {
+        retries++;
         const retryReply = await callApi(
-          `【系统指令：必须严格按格式回复】\n[MSG]对话[/MSG]\n[THOUGHT]心理[/THOUGHT]\n[EXPRESSION]表情[/EXPRESSION]\n[ACTION]动作[/ACTION]\n[STATS:a,b,c,d,e]\n\n刚才说的是："${text}"，请用正确格式重新回复。`,
+          `【系统指令：必须严格按格式回复，不要输出乱码】\n[MSG]对话[/MSG]\n[THOUGHT]心理[/THOUGHT]\n[EXPRESSION]表情[/EXPRESSION]\n[ACTION]动作[/ACTION]\n[STATS:a,b,c,d,e]\n\n刚才说的是："${text}"，请用正确格式重新回复。`,
           ch
         );
         if (_replyGate !== myGate) return;
@@ -816,7 +835,10 @@ async function sendMessage() {
       }
 
       ch.apiMessages.push({ role: 'user', content: text });
-      ch.apiMessages.push({ role: 'assistant', content: reply });
+      // 只存储正常回复，避免污染上下文
+      if (!isReplyGarbled(reply)) {
+        ch.apiMessages.push({ role: 'assistant', content: reply });
+      }
       ch.chatHistory.push({ role: 'player', text, week: ch.week });
       ch.chatHistory.push({ role: 'target', text: cleanMsg, extra, week: ch.week });
 
@@ -844,10 +866,12 @@ async function sendMessage() {
 
     let parsed = parseReply(reply);
 
-    // 如果 AI 没按格式来，用更强指令重试一次
-    if (!parsed.hasFormat) {
+    // 重试：格式不对 或 明显乱码
+    let retries = 0;
+    while ((!parsed.hasFormat || isReplyGarbled(reply)) && retries < 2) {
+      retries++;
       const retryReply = await callApi(
-        `【系统指令：必须严格按格式回复】\n[MSG]对话[/MSG]\n[THOUGHT]心理[/THOUGHT]\n[EXPRESSION]表情[/EXPRESSION]\n[ACTION]动作[/ACTION]\n[STATS:a,b,c,d,e]\n\n刚才说的是："${text}"，请用正确格式重新回复。`,
+        `【系统指令：必须严格按格式回复，不要输出乱码】\n[MSG]对话[/MSG]\n[THOUGHT]心理[/THOUGHT]\n[EXPRESSION]表情[/EXPRESSION]\n[ACTION]动作[/ACTION]\n[STATS:a,b,c,d,e]\n\n刚才说的是："${text}"，请用正确格式重新回复。`,
         ch
       );
       if (_replyGate !== myGate) return;
@@ -876,7 +900,10 @@ async function sendMessage() {
     }
 
     ch.apiMessages.push({ role: 'user', content: text });
-    ch.apiMessages.push({ role: 'assistant', content: reply });
+    // 只存储正常回复，避免污染上下文
+    if (!isReplyGarbled(reply)) {
+      ch.apiMessages.push({ role: 'assistant', content: reply });
+    }
     ch.chatHistory.push({ role: 'player', text, week: ch.week });
     ch.chatHistory.push({ role: 'target', text: cleanMsg, extra, week: ch.week });
 
