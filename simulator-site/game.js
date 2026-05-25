@@ -1363,6 +1363,45 @@ function loadFromJSON(jsonStr) {
   return true;
 }
 
+// 合并导入：不替换已有角色，保留消息更多的版本
+function mergeFromJSON(jsonStr) {
+  const data = JSON.parse(jsonStr);
+  const imported = data.characters || {};
+
+  // 补全导入角色的默认字段
+  Object.values(imported).forEach(ch => {
+    ch.completedScenarios = ch.completedScenarios || [];
+    ch.eventLog = ch.eventLog || [];
+    ch.kinks = ch.kinks || [];
+    ch.persona = ch.persona || '';
+    ch.chatHistory = ch.chatHistory || [];
+    if (!ch.createdAt) ch.createdAt = Date.now();
+  });
+
+  // 合并每个角色
+  Object.entries(imported).forEach(([id, ch]) => {
+    const existing = state.characters[id];
+    if (existing) {
+      // 保留消息更多的版本
+      if (ch.chatHistory.length > existing.chatHistory.length) {
+        state.characters[id] = ch;
+      }
+      // 否则保留现有的（不替换）
+    } else {
+      // 新角色，直接加入
+      state.characters[id] = ch;
+      state.charOrder.push(id);
+    }
+  });
+
+  // 如果当前没有活跃角色，选第一个
+  if (!state.activeCharId || !state.characters[state.activeCharId]) {
+    state.activeCharId = state.charOrder[0] || null;
+  }
+
+  return true;
+}
+
 function loadGame() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return false;
@@ -1788,7 +1827,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        if (!loadFromJSON(raw)) throw new Error('数据加载失败');
+        if (!mergeFromJSON(raw)) throw new Error('数据加载失败');
       } catch (err) {
         alert('步骤1-加载数据失败：' + err.message);
         return;
@@ -1812,6 +1851,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       try {
         initGameUI();
+        saveGame(); // 合并后持久化
       } catch (err) {
         alert('步骤4-初始化游戏失败：' + err.message + '\n请截图发给开发者');
         console.error(err);
