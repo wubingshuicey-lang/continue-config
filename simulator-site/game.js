@@ -363,6 +363,36 @@ function switchCharacter(charId) {
   document.getElementById('chatInput').focus();
 }
 
+function switchToGroup(groupId) {
+  state.activeGroupId = groupId;
+  state.activeCharId = null;
+
+  const group = state.groupChats.find(g => g.id === groupId);
+  if (!group) return;
+
+  const msgs = document.getElementById('chatMessages');
+  msgs.innerHTML = '';
+  const names = group.members.map(id => state.characters[id]?.targetName || id).join('、');
+  document.getElementById('currentCharName').textContent = `👥 ${names}`;
+  document.getElementById('chatModeBadge').textContent = `👥 群聊：${names}`;
+  document.getElementById('chatModeBadge').style.display = '';
+  document.getElementById('chatModeBadge').style.cursor = 'pointer';
+  document.getElementById('chatModeBadge').onclick = () => exitGroupChat();
+  addSystemMessage(`👥 群聊：${names}`);
+  group.messages.forEach(m => {
+    if (m.role === 'player') {
+      addMessage('player', m.text);
+    } else {
+      const senderName = state.characters[m.senderId]?.targetName || '';
+      addMessage('target', m.text, m.extra, senderName);
+    }
+  });
+
+  updateStatsFloat();
+  updateCharDropdown();
+  document.getElementById('chatInput').focus();
+}
+
 function createNewCharacter() {
   // 回到创建页
   document.getElementById('gameScreen').classList.add('hidden');
@@ -379,10 +409,24 @@ function updateCharDropdown() {
 
   Object.values(state.characters).forEach(ch => {
     const div = document.createElement('div');
-    div.className = 'char-dropdown-item' + (ch.id === state.activeCharId ? ' active' : '');
+    div.className = 'char-dropdown-item' + (ch.id === state.activeCharId && !state.activeGroupId ? ' active' : '');
     div.textContent = `${ch.targetName} · ${getStage(ch)}`;
     div.addEventListener('click', () => {
       switchCharacter(ch.id);
+      dropdown.classList.add('hidden');
+    });
+    dropdown.appendChild(div);
+  });
+
+  // 显示已有群聊
+  state.groupChats.forEach(g => {
+    const names = g.members.map(id => state.characters[id]?.targetName || id).join('、');
+    const div = document.createElement('div');
+    div.className = 'char-dropdown-item' + (g.id === state.activeGroupId ? ' active' : '');
+    div.style.color = 'var(--accent, #c8a96e)';
+    div.textContent = `👥 ${names}`;
+    div.addEventListener('click', () => {
+      switchToGroup(g.id);
       dropdown.classList.add('hidden');
     });
     dropdown.appendChild(div);
