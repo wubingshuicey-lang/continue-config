@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>梦女模拟器</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -28,42 +28,30 @@
         <p class="subtitle">一个属于你的故事</p>
         <h1>梦女模拟器</h1>
         <p class="desc">
-          选择你的身份、职业、攻略对象<br>
-          在现实都市中，慢慢靠近一个人<br>
-          每周五个行动点，剧情随你的选择流动
+          创建你的角色，在现实都市中慢慢靠近一个人<br>
+          他会主动找你、会忙、会吃醋<br>
+          像真人一样，用他的语气跟你聊天
         </p>
         <button class="btn-start" id="btnStartGame">开始新游戏</button>
       </div>
     </section>
 
     <section class="features">
-      <div class="glass-card feature-card">
-        <div class="card-icon">✧</div>
-        <h3>慢慢来</h3>
-        <p>从陌生到认识，从朋友到暧昧。<br>所有关系都一步一步推进，<br>真实的恋爱没有快进键。</p>
-      </div>
-      <div class="glass-card feature-card">
-        <div class="card-icon">◈</div>
-        <h3>他有自己的生活</h3>
-        <p>他会加班、会忙到失联、<br>会有情绪低落的时刻。<br>心动值也可能下降。</p>
-      </div>
-      <div class="glass-card feature-card">
-        <div class="card-icon">◆</div>
-        <h3>你的选择改变一切</h3>
-        <p>吃醋、冷战、试探、和好。<br>修罗场、地下恋、结婚线。<br>每个决定都算数。</p>
-      </div>
+      <div class="glass-card feature-card"><div class="card-icon">✧</div><h3>他主动找你</h3><p>他会在意你、会主动发消息<br>会问你在干嘛、会记得你说过的话</p></div>
+      <div class="glass-card feature-card"><div class="card-icon">◈</div><h3>自由切换角色</h3><p>创建多个攻略对象<br>不同时间跟不同的人聊天</p></div>
+      <div class="glass-card feature-card"><div class="card-icon">◆</div><h3>网聊 + 见面</h3><p>切换线上聊天和线下见面模式<br>见面时动作和场景自然融入</p></div>
     </section>
 
     <footer class="glass-footer">
-      <p>存档进度 · 自定义角色 · 接入 AI 模型</p>
+      <p>存档进度 · 角色收藏 · 群聊模式 · 时间流逝</p>
     </footer>
   </div>
 
   <!-- ====== 角色创建 ====== -->
   <div class="game-container hidden" id="createScreen">
     <div class="glass-card create-card">
-      <p class="subtitle">Step 1 · 创建你的角色</p>
-      <h2>你是谁？</h2>
+      <p class="subtitle">创建一个新角色</p>
+      <h2>这次想攻略谁？</h2>
 
       <div class="create-section">
         <label>你的昵称</label>
@@ -84,8 +72,8 @@
       </div>
 
       <div class="create-section">
-        <label>攻略对象名字（可自定义，留空则随机生成）</label>
-        <input type="text" class="glass-input" id="targetNameInput" placeholder="输入名字或留空…" maxlength="8">
+        <label>攻略对象名字</label>
+        <input type="text" class="glass-input" id="targetNameInput" placeholder="自定义或留空随机生成…" maxlength="8">
       </div>
 
       <div class="create-section">
@@ -105,8 +93,8 @@
         <label>亲密推进风格</label>
         <div class="choice-grid style-grid" id="paceStyle">
           <button class="glass-chip" data-value="slow">慢热纯爱</button>
-          <button class="glass-chip" data-value="moderate">情感为主，适度刺激</button>
-          <button class="glass-chip" data-value="fast">纯欲刺激线</button>
+          <button class="glass-chip" data-value="moderate">情感为主</button>
+          <button class="glass-chip" data-value="fast">纯欲刺激</button>
           <button class="glass-chip" data-value="heavy">重口模式</button>
         </div>
       </div>
@@ -117,49 +105,66 @@
 
   <!-- ====== 游戏主界面 ====== -->
   <div class="game-container hidden" id="gameScreen">
-    <!-- 顶部状态栏 -->
+    <!-- 顶部栏 -->
     <div class="game-topbar glass-nav">
-      <button class="icon-btn" id="btnBackHome" title="返回首页">←</button>
-      <span class="week-label" id="weekLabel">第 1 周</span>
-      <span class="action-dots" id="actionDots">●●●●●</span>
-      <span class="stage-label" id="stageLabel">陌生</span>
+      <button class="icon-btn" id="btnBackHome" title="返回">←</button>
+
+      <div class="char-selector" id="charSelector">
+        <span class="char-selector-name" id="currentCharName">攻略对象</span>
+        <span class="char-selector-arrow">▾</span>
+        <div class="char-dropdown glass-card hidden" id="charDropdown"></div>
+      </div>
+
+      <span class="week-label" id="weekLabel">第1周</span>
+      <span class="time-label" id="timeLabel">周一 09:00</span>
+
       <div class="topbar-actions">
+        <button class="icon-btn mode-btn" id="btnModeToggle" title="网聊/见面切换">📱</button>
+        <button class="icon-btn" id="btnSearch" title="搜索聊天记录">🔍</button>
+        <button class="icon-btn" id="btnCreateChar" title="创建新角色">＋</button>
+        <button class="icon-btn" id="btnGroupChat" title="创建群聊">👥</button>
         <button class="icon-btn" id="btnSettings" title="API 设置">⚙</button>
-        <button class="theme-toggle" id="themeToggle2" aria-label="切换深浅模式">
-          <span class="toggle-icon">☾</span>
-        </button>
+        <button class="theme-toggle" id="themeToggle2"><span class="toggle-icon">☾</span></button>
       </div>
     </div>
 
-    <div class="game-main">
-      <!-- 左侧数值面板 -->
-      <aside class="stats-panel glass-card" id="statsPanel">
-        <h4 id="targetName">攻略对象</h4>
-        <div class="stat-row"><span>好感</span><div class="stat-bar"><div class="stat-fill" id="statFavor" style="width:5%"></div></div><span class="stat-val">5</span></div>
-        <div class="stat-row"><span>熟悉度</span><div class="stat-bar"><div class="stat-fill familiar" id="statFamiliar" style="width:0%"></div></div><span class="stat-val">0</span></div>
-        <div class="stat-row"><span>心动值</span><div class="stat-bar"><div class="stat-fill heart" id="statHeart" style="width:0%"></div></div><span class="stat-val">0</span></div>
-        <div class="stat-row"><span>依赖值</span><div class="stat-bar"><div class="stat-fill depend" id="statDepend" style="width:0%"></div></div><span class="stat-val">0</span></div>
-        <div class="stat-row"><span>吃醋值</span><div class="stat-bar"><div class="stat-fill jealous" id="statJealous" style="width:0%"></div></div><span class="stat-val">0</span></div>
-        <div class="stat-divider"></div>
-        <div class="stat-row stage-row">
-          <span>关系阶段</span>
-          <span class="stage-badge" id="stageBadge">陌生</span>
-        </div>
-        <button class="btn-next-week" id="btnNextWeek">⏭ 推进到下一周</button>
-      </aside>
+    <!-- 搜索条 -->
+    <div class="search-bar hidden" id="searchBar">
+      <input type="text" class="glass-input" id="searchInput" placeholder="搜索聊天记录…">
+      <span class="search-count" id="searchCount"></span>
+      <button class="icon-btn" id="btnSearchClose">✕</button>
+    </div>
 
-      <!-- 右侧聊天区 -->
+    <div class="game-main">
+      <!-- 聊天区 -->
       <div class="chat-area glass-card" id="chatArea">
-        <div class="chat-messages" id="chatMessages">
-          <div class="chat-hint">故事即将开始…</div>
-        </div>
+        <div class="chat-mode-badge" id="chatModeBadge">📱 网聊模式</div>
+        <div class="chat-messages" id="chatMessages"><div class="chat-hint">故事即将开始…</div></div>
         <div class="chat-typing hidden" id="chatTyping">
+          <span class="typing-label">对方正在输入…</span>
           <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
         </div>
         <div class="chat-input-row">
-          <textarea class="chat-input glass-input" id="chatInput" placeholder="输入你想说的话或做的事…" rows="1"></textarea>
+          <textarea class="chat-input glass-input" id="chatInput" placeholder="输入消息…" rows="1"></textarea>
           <button class="btn-send" id="btnSend">发送</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 浮动数值面板(可收起) -->
+    <div class="stats-float glass-card" id="statsFloat">
+      <div class="stats-float-header" id="statsFloatHeader">
+        <span id="statsFloatName">攻略对象</span>
+        <span class="stats-toggle-icon">▼</span>
+      </div>
+      <div class="stats-float-body" id="statsFloatBody">
+        <div class="stat-mini"><span>好感</span><div class="stat-bar"><div class="stat-fill" id="statFavor"></div></div></div>
+        <div class="stat-mini"><span>熟悉</span><div class="stat-bar"><div class="stat-fill familiar" id="statFamiliar"></div></div></div>
+        <div class="stat-mini"><span>心动</span><div class="stat-bar"><div class="stat-fill heart" id="statHeart"></div></div></div>
+        <div class="stat-mini"><span>依赖</span><div class="stat-bar"><div class="stat-fill depend" id="statDepend"></div></div></div>
+        <div class="stat-mini"><span>吃醋</span><div class="stat-bar"><div class="stat-fill jealous" id="statJealous"></div></div></div>
+        <div class="stage-badge-mini" id="stageBadge">陌生</div>
+        <button class="btn-next-week" id="btnNextWeek">⏭ 下一周</button>
       </div>
     </div>
   </div>
@@ -168,38 +173,33 @@
   <div class="modal-overlay hidden" id="apiModal">
     <div class="modal-card glass-card">
       <h3>API 设置</h3>
-      <p class="modal-desc">接入 AI 模型来驱动剧情对话</p>
-
       <div class="create-section">
         <label>模型平台</label>
         <div class="choice-grid" id="apiProvider">
           <button class="glass-chip selected" data-value="deepseek">DeepSeek</button>
-          <button class="glass-chip" data-value="openai">OpenAI (兼容)</button>
+          <button class="glass-chip" data-value="openai">OpenAI</button>
           <button class="glass-chip" data-value="gemini">Gemini</button>
           <button class="glass-chip" data-value="claude">Claude</button>
         </div>
       </div>
-
-      <div class="create-section">
-        <label>API Key</label>
-        <input type="password" class="glass-input" id="apiKey" placeholder="sk-…">
-      </div>
-
-      <div class="create-section">
-        <label>API 地址（可选，使用默认则留空）</label>
-        <input type="text" class="glass-input" id="apiBase" placeholder="默认地址">
-      </div>
-
-      <div class="create-section">
-        <label>模型名称（可选）</label>
-        <input type="text" class="glass-input" id="apiModel" placeholder="默认模型">
-      </div>
-
+      <div class="create-section"><label>API Key</label><input type="password" class="glass-input" id="apiKey" placeholder="sk-…"></div>
+      <div class="create-section"><label>API 地址（可选）</label><input type="text" class="glass-input" id="apiBase" placeholder="默认地址"></div>
+      <div class="create-section"><label>模型名称（可选）</label><input type="text" class="glass-input" id="apiModel" placeholder="默认模型"></div>
       <div class="modal-buttons">
         <button class="choice-btn" id="btnTestApi">测试连接</button>
         <button class="btn-start" id="btnSaveApi">保存设置</button>
       </div>
       <p class="api-status" id="apiStatus"></p>
+    </div>
+  </div>
+
+  <!-- ====== 群聊创建弹窗 ====== -->
+  <div class="modal-overlay hidden" id="groupModal">
+    <div class="modal-card glass-card">
+      <h3>创建群聊</h3>
+      <p class="modal-desc">选择要拉入群聊的角色</p>
+      <div class="group-char-list" id="groupCharList"></div>
+      <button class="btn-start" id="btnCreateGroup">创建群聊</button>
     </div>
   </div>
 

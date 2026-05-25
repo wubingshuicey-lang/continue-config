@@ -1,87 +1,55 @@
-// === 梦女模拟器 - 聊天驱动游戏引擎 ===
+// === 梦女模拟器 v2 - 多角色聊天引擎 ===
 
-// ==================== 游戏状态 ====================
+const SAVE_KEY = 'dream-sim-save';
+const API_CONFIG_KEY = 'dream-sim-api-config';
+
+// ==================== 全局状态 ====================
 const state = {
-  playerName: '',
-  playerJob: '',
-  targetJob: '',
-  targetName: '',
-  paceStyle: '',
-
-  favor: 5,
-  familiar: 0,
-  heart: 0,
-  depend: 0,
-  jealous: 0,
-
-  week: 1,
-  msgCount: 0,          // 本周已发消息数
-
-  chatHistory: [],   // { role: 'player'|'target'|'narrator', text, week }
-  apiMessages: [],   // LLM 上下文（只有 target 和 player，不含 narrator）
-  eventLog: [],
-  weeklySummaries: [],
+  characters: {},        // { id: CharacterData }
+  charOrder: [],        // 创建顺序
+  activeCharId: null,
+  mode: 'online',       // 'online' | 'meetup'
+  gameTime: { day: 1, hour: 9, minute: 0 },  // day 1 = 周一
+  groupChats: [],       // [{ id, members[], messages[] }]
+  activeGroupId: null,
+  lastActiveTick: Date.now(),
+  proactiveInterval: null,
 };
 
-// ==================== 工具 ====================
-function getStage() {
-  const total = state.favor + state.familiar * 0.6 + state.heart * 0.4;
-  if (total >= 80) return { name: '恋爱', min: 80 };
-  if (total >= 60) return { name: '暧昧', min: 60 };
-  if (total >= 40) return { name: '朋友', min: 40 };
-  if (total >= 20) return { name: '认识', min: 20 };
-  return { name: '陌生', min: 0 };
+// 单个角色数据模板
+function newCharacterData(cfg) {
+  return {
+    id: cfg.id,
+    targetName: cfg.targetName,
+    targetJob: cfg.targetJob,
+    playerName: cfg.playerName,
+    playerJob: cfg.playerJob,
+    paceStyle: cfg.paceStyle,
+    favor: 5, familiar: 0, heart: 0, depend: 0, jealous: 0,
+    week: 1, msgCount: 0,
+    chatHistory: [],    // [{ role, text, week, narration?, hidden }]
+    apiMessages: [],    // LLM 上下文
+    eventLog: [],
+    createdAt: Date.now(),
+  };
 }
 
+// ==================== 工具函数 ====================
+function getActiveChar() { return state.activeCharId ? state.characters[state.activeCharId] : null; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rpick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
 
-// ==================== UI ====================
-function updateStatsUI() {
-  document.getElementById('statFavor').style.width = state.favor + '%';
-  document.getElementById('statFamiliar').style.width = state.familiar + '%';
-  document.getElementById('statHeart').style.width = state.heart + '%';
-  document.getElementById('statDepend').style.width = state.depend + '%';
-  document.getElementById('statJealous').style.width = state.jealous + '%';
-
-  document.querySelectorAll('#statsPanel .stat-val').forEach((el, i) => {
-    const vals = [state.favor, state.familiar, state.heart, state.depend, state.jealous];
-    if (vals[i] !== undefined) el.textContent = vals[i];
-  });
-
-  const stage = getStage();
-  document.getElementById('stageBadge').textContent = stage.name;
-  document.getElementById('stageLabel').textContent = stage.name;
-  document.getElementById('targetName').textContent = state.targetName;
-  document.getElementById('weekLabel').textContent = `第 ${state.week} 周`;
-  document.getElementById('actionDots').textContent = `本周 ${state.msgCount} 条消息`;
+function getStage(ch) {
+  const total = ch.favor + ch.familiar * 0.6 + ch.heart * 0.4;
+  if (total >= 80) return '恋爱';
+  if (total >= 60) return '暧昧';
+  if (total >= 40) return '朋友';
+  if (total >= 20) return '认识';
+  return '陌生';
 }
 
-function scrollChat() {
-  const msgs = document.getElementById('chatMessages');
-  setTimeout(() => { msgs.scrollTop = msgs.scrollHeight; }, 50);
-}
-
-function addChatMessage(role, text) {
-  const msgs = document.getElementById('chatMessages');
-  // 移除初始提示
-  const hint = msgs.querySelector('.chat-hint');
-  if (hint) hint.remove();
-
-  const div = document.createElement('div');
-  div.className = `chat-msg ${role}`;
-
-  let senderLabel = '';
-  if (role === 'target') senderLabel = state.targetName;
-  if (role === 'player') senderLabel = state.playerName || '你';
-
-  div.innerHTML = `
-    ${senderLabel ? `<div class="msg-sender">${senderLabel}</div>` : ''}
-    <div class="msg-bubble">${escapeHtml(text)}</div>
-  `;
-  msgs.appendChild(div);
-  scrollChat();
-}
+const STAGES = ['陌生', '认识', '朋友', '暧昧', '恋爱'];
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -89,259 +57,405 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// ==================== 时间系统 ====================
+const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+function getTimeStr() {
+  const dayName = DAY_NAMES[(state.gameTime.day - 1) % 7];
+  const h = String(state.gameTime.hour).padStart(2, '0');
+  const m = String(state.gameTime.minute).padStart(2, '0');
+  return `${dayName} ${h}:${m}`;
+}
+
+function advanceTime(minutes) {
+  state.gameTime.minute += minutes;
+  while (state.gameTime.minute >= 60) { state.gameTime.minute -= 60; state.gameTime.hour++; }
+  while (state.gameTime.hour >= 24) { state.gameTime.hour -= 24; state.gameTime.day++; }
+  document.getElementById('timeLabel').textContent = getTimeStr();
+}
+
+// ==================== UI 更新 ====================
+function updateStatsFloat() {
+  const ch = getActiveChar();
+  if (!ch) return;
+
+  document.getElementById('statsFloatName').textContent = ch.targetName;
+  document.getElementById('statFavor').style.width = ch.favor + '%';
+  document.getElementById('statFamiliar').style.width = ch.familiar + '%';
+  document.getElementById('statHeart').style.width = ch.heart + '%';
+  document.getElementById('statDepend').style.width = ch.depend + '%';
+  document.getElementById('statJealous').style.width = ch.jealous + '%';
+  document.getElementById('stageBadge').textContent = getStage(ch);
+
+  document.getElementById('weekLabel').textContent = `第${ch.week}周`;
+  document.getElementById('currentCharName').textContent = ch.targetName;
+  document.getElementById('timeLabel').textContent = getTimeStr();
+}
+
+function updateModeUI() {
+  const btn = document.getElementById('btnModeToggle');
+  const badge = document.getElementById('chatModeBadge');
+  if (state.mode === 'online') {
+    btn.textContent = '📱'; btn.classList.remove('active');
+    badge.textContent = '📱 网聊模式';
+  } else {
+    btn.textContent = '🤝'; btn.classList.add('active');
+    badge.textContent = '🤝 见面模式';
+  }
+}
+
+function scrollChat() {
+  const msgs = document.getElementById('chatMessages');
+  setTimeout(() => { msgs.scrollTop = msgs.scrollHeight; }, 30);
+}
+
 function showTyping(show) {
   document.getElementById('chatTyping').classList.toggle('hidden', !show);
   scrollChat();
 }
 
-function setSendEnabled(enabled) {
-  document.getElementById('btnSend').disabled = !enabled;
-  document.getElementById('chatInput').disabled = !enabled;
+function setSendEnabled(v) {
+  document.getElementById('btnSend').disabled = !v;
+  document.getElementById('chatInput').disabled = !v;
 }
 
-// ==================== 系统提示词 ====================
-function buildSystemPrompt() {
-  const stage = getStage();
-  const paceLabels = { slow: '慢热纯爱', moderate: '情感为主适度刺激', fast: '纯欲刺激线', heavy: '重口模式' };
+// ==================== 消息渲染 ====================
+function addMessage(role, text, narration) {
+  const msgs = document.getElementById('chatMessages');
+  const hint = msgs.querySelector('.chat-hint');
+  if (hint) hint.remove();
 
-  return `你是一个恋爱模拟游戏的AI角色。你必须完全扮演以下角色，永远不要跳出角色解释或说明。
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role}`;
 
-## 你的角色
-- 名字：${state.targetName}
-- 职业：${state.targetJob}
-- 性别：男
-- 性格：沉稳内敛，不油腻不霸总，行动多于言语，有自己的原则和边界。关心人但不会甜言蜜语，用行动表达。工作认真，会忙会累，不是24小时围着别人转的人。
+  let sender = '';
+  const ch = getActiveChar();
+  if (role === 'target') sender = ch ? ch.targetName : '';
+  if (role === 'player') sender = ch ? ch.playerName : '你';
 
-## 玩家信息
-- 名字：${state.playerName}
-- 职业：${state.playerJob}
-- 你们目前的关系阶段：${stage.name}（好感${state.favor}/熟悉${state.familiar}/心动${state.heart}/依赖${state.depend}）
+  let html = sender ? `<div class="msg-sender">${sender}</div>` : '';
+  html += `<div class="msg-bubble">${escapeHtml(text)}</div>`;
 
-## 关系阶段规则（严格遵守）
-${getStageRules()}
+  // 可折叠的叙述
+  if (narration && narration.trim()) {
+    const nId = 'nar_' + uid();
+    html += `<button class="narration-toggle" onclick="toggleNarration('${nId}')">▸ 展开场景/动作</button>`;
+    html += `<div class="narration-content" id="${nId}">${escapeHtml(narration)}</div>`;
+  }
 
-## 亲密推进风格
-- 当前设定：${paceLabels[state.paceStyle] || state.paceStyle}
-${getPaceRules()}
-
-## 写作要求
-- 长描写，沉浸式叙事，文风像豆瓣/网络高热恋爱文
-- 不要油腻霸总感，不要老土剧情
-- 每次回复要有场景感、细节描写、心理活动
-- 自然融入生活细节（工作、朋友、情绪、压力）
-- 语气真实，像真正的人对话，该短就短该长就长
-- 对话和叙述混合，不要全是对白
-- 每次回复结尾必须输出一个不可见的状态更新标记：
-  [STATS:好感变化值,熟悉度变化值,心动值变化值,依赖值变化值,吃醋值变化值]
-  例如：[STATS:3,2,1,0,0] 表示好感+3 熟悉度+2 心动值+1
-  又例如：[STATS:0,0,-1,0,0] 表示心动值-1
-  数值范围-10到+10。这个标记会被系统解析，不会显示给玩家。
-
-## 当前时间
-第${state.week}周。你可以自由对话，不受行动点限制。本周已发${state.msgCount}条消息。
-
-## 重要提醒
-- 你有自己的工作和生活，你会忙、会累、可能回复慢
-- 不要突然告白或过度亲密（除非关系阶段允许）
-- 保持慢热、真实、有张力
-- 直接开始角色扮演，不要输出任何解释文字`;
+  div.innerHTML = html;
+  div.dataset.searchText = (text + ' ' + (narration || '')).toLowerCase();
+  div.dataset.role = role;
+  msgs.appendChild(div);
+  scrollChat();
 }
 
-function getStageRules() {
-  const stage = getStage();
-  const rules = {
-    '陌生': '- 你们刚刚认识或不熟\n- 保持礼貌距离\n- 可以有偶遇、简短交流\n- 禁止：肢体接触、暧昧言语、过度关心、深夜私聊',
-    '认识': '- 你们算认识的人了\n- 可以正常聊天、偶尔约饭\n- 可以有一些无意识的细节关注\n- 禁止：亲密肢体接触、明确暧昧、吃醋表现',
-    '朋友': '- 你们是朋友关系\n- 可以聊天、约饭、聚会、偶尔深夜消息\n- 可以有一些自然的小关心\n- 可以有微弱的心动迹象\n- 禁止：亲密接触、直白告白',
-    '暧昧': '- 你们之间有暧昧氛围\n- 可以有吃醋、试探、深夜电话\n- 可以有不小心碰到手、靠肩膀等意外接触\n- 可以说一些暧昧的话\n- 可以有明显的心动表现\n- 禁止：正式告白、重度亲密行为',
-    '恋爱': '- 你们在恋爱关系中\n- 可以有亲密行为、直白表达感情\n- 可以有吃醋、冷战、和好\n- 可以有日常同居感\n- 可以有身体接触、亲吻等',
+function addSystemMessage(text) {
+  const msgs = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg system';
+  div.innerHTML = `<div class="msg-bubble">${text}</div>`;
+  div.dataset.role = 'system';
+  msgs.appendChild(div);
+  scrollChat();
+}
+
+// 全局函数给 onclick 用
+window.toggleNarration = function(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const toggle = el.previousElementSibling;
+  el.classList.toggle('open');
+  if (el.classList.contains('open')) {
+    toggle.textContent = '▾ 收起场景/动作';
+  } else {
+    toggle.textContent = '▸ 展开场景/动作';
+  }
+};
+
+// ==================== 角色管理 ====================
+function switchCharacter(charId) {
+  if (state.activeCharId === charId) return;
+  state.activeCharId = charId;
+  state.activeGroupId = null;
+
+  document.getElementById('chatMessages').innerHTML = '<div class="chat-hint">已切换到 ' + state.characters[charId].targetName + '</div>';
+
+  const ch = state.characters[charId];
+  // 渲染本周聊天记录
+  ch.chatHistory.forEach(h => {
+    if (h.week === ch.week) addMessage(h.role, h.text, h.narration);
+  });
+
+  updateStatsFloat();
+  updateCharDropdown();
+  document.getElementById('chatInput').focus();
+}
+
+function createNewCharacter() {
+  // 回到创建页
+  document.getElementById('gameScreen').classList.add('hidden');
+  document.getElementById('createScreen').classList.remove('hidden');
+  if (!window._createScreenSetup) {
+    setupCreateScreen();
+    window._createScreenSetup = true;
+  }
+}
+
+function updateCharDropdown() {
+  const dropdown = document.getElementById('charDropdown');
+  dropdown.innerHTML = '';
+
+  Object.values(state.characters).forEach(ch => {
+    const div = document.createElement('div');
+    div.className = 'char-dropdown-item' + (ch.id === state.activeCharId ? ' active' : '');
+    div.textContent = `${ch.targetName} · ${getStage(ch)}`;
+    div.addEventListener('click', () => {
+      switchCharacter(ch.id);
+      dropdown.classList.add('hidden');
+    });
+    dropdown.appendChild(div);
+  });
+
+  // 添加 "创建新角色" 选项
+  const addDiv = document.createElement('div');
+  addDiv.className = 'char-dropdown-item';
+  addDiv.style.opacity = '0.6';
+  addDiv.textContent = '+ 创建新角色';
+  addDiv.addEventListener('click', () => {
+    dropdown.classList.add('hidden');
+    createNewCharacter();
+  });
+  dropdown.appendChild(addDiv);
+}
+
+// ==================== 群聊 ====================
+function setupGroupModal() {
+  const list = document.getElementById('groupCharList');
+  list.innerHTML = '';
+  const selected = new Set();
+
+  Object.values(state.characters).forEach(ch => {
+    const chip = document.createElement('button');
+    chip.className = 'group-char-chip';
+    chip.textContent = ch.targetName;
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('selected');
+      if (chip.classList.contains('selected')) selected.add(ch.id);
+      else selected.delete(ch.id);
+    });
+    list.appendChild(chip);
+  });
+
+  document.getElementById('btnCreateGroup').onclick = () => {
+    if (selected.size < 2) { alert('至少选两个角色'); return; }
+
+    const gid = uid();
+    state.groupChats.push({ id: gid, members: [...selected], messages: [] });
+    state.activeGroupId = gid;
+    state.activeCharId = null;
+
+    document.getElementById('groupModal').classList.add('hidden');
+    document.getElementById('chatMessages').innerHTML = '';
+
+    const memberNames = [...selected].map(id => state.characters[id].targetName).join('、');
+    addSystemMessage(`👥 群聊已创建：${memberNames}`);
+
+    updateStatsFloat();
+    document.getElementById('chatInput').focus();
   };
-  return rules[stage.name] || rules['陌生'];
-}
-
-function getPaceRules() {
-  const rules = {
-    'slow': '- 严格遵循关系阶段，绝不越级\n- 亲密行为只在恋爱阶段（80+）开放\n- 注重情感铺垫和心理描写',
-    'moderate': '- 以情感为主\n- 暧昧期（60-80）可以在高张力场景下有轻微亲密（深吻、抚摸），但不一定到最后一步\n- 注重情感真实性',
-    'fast': '- 可以在熟悉度≥25时的高张力场景下出现克制但强烈的占有欲\n- 允许眼神凶狠、命令式语气、短暂肢体压制\n- 亲密后可能有自责、躲着对方等事后反应\n- 保留角色核心性格',
-    'heavy': '- 允许更强烈的亲密描写\n- 可以在合适场景下触发重口内容\n- 但角色性格底线不变，不会变成无脑服从',
-  };
-  return rules[state.paceStyle] || rules['slow'];
 }
 
 // ==================== API 调用 ====================
-const API_CONFIG_KEY = 'dream-sim-api-config';
-
 function getApiConfig() {
-  try {
-    return JSON.parse(localStorage.getItem(API_CONFIG_KEY)) || {};
-  } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(API_CONFIG_KEY)) || {}; } catch { return {}; }
 }
 
-function saveApiConfig(config) {
-  localStorage.setItem(API_CONFIG_KEY, JSON.stringify(config));
+function saveApiConfig(cfg) { localStorage.setItem(API_CONFIG_KEY, JSON.stringify(cfg)); }
+
+function getDefaultEndpoint(p) {
+  return { deepseek:'https://api.deepseek.com/v1/chat/completions', openai:'https://api.openai.com/v1/chat/completions', gemini:'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', claude:'https://api.anthropic.com/v1/messages' }[p] || '';
 }
 
-function getDefaultEndpoint(provider) {
-  const defaults = {
-    'deepseek': 'https://api.deepseek.com/v1/chat/completions',
-    'openai': 'https://api.openai.com/v1/chat/completions',
-    'gemini': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-    'claude': 'https://api.anthropic.com/v1/messages',
+function getDefaultModel(p) {
+  return { deepseek:'deepseek-chat', openai:'gpt-4o', gemini:'gemini-2.0-flash', claude:'claude-sonnet-4-6' }[p] || '';
+}
+
+function buildSystemPrompt(ch) {
+  const stage = getStage(ch);
+  const paceLabels = { slow:'慢热纯爱', moderate:'情感为主', fast:'纯欲刺激', heavy:'重口模式' };
+  const timeStr = getTimeStr();
+
+  const modeInstructions = state.mode === 'online'
+    ? `## 当前模式：网聊模式
+- 这是微信/短信聊天。用真实的口语、简短的自然语气。
+- 像真人一样发消息：会打错字（偶尔）、会发短句、会已读不回、会过一会儿再回。
+- 你可以主动开启话题、问问题、分享日常。
+- 禁止在网聊模式写场景描写和动作叙述。仅输出对话文字。
+- 回复格式：只输出聊天文字，不要加任何场景描写。`
+    : `## 当前模式：见面模式
+- 你们在现实中见面。可以进行动作、场景描写。
+- 回复格式：[MSG]对话内容[/MSG]\n[NARRATION]场景、动作、心理描写[/NARRATION]
+- MSG部分是你说的对话。NARRATION部分是场景和动作描写。`;
+
+  return `你是恋爱模拟游戏的AI角色，必须完全扮演以下角色。
+
+## 角色设定
+- 名字：${ch.targetName}
+- 职业：${ch.targetJob}
+- 性别：男
+- 性格：沉稳内敛，不油腻不霸总，行动多于言语。关心人但不甜言蜜语。有自己的工作和生活，会忙会累。
+
+## 玩家信息
+- 名字：${ch.playerName}，职业：${ch.playerJob}
+- 关系阶段：${stage}（好感${ch.favor}/熟悉${ch.familiar}/心动${ch.heart}/依赖${ch.depend}）
+- 亲密风格：${paceLabels[ch.paceStyle] || ch.paceStyle}
+
+## 关系阶段规则
+${getStageRules(stage)}
+
+${getPaceRules(ch.paceStyle)}
+
+${modeInstructions}
+
+## 时间：${timeStr}，第${ch.week}周
+
+## 重要
+- 用你自己的语气说话，像真人聊天一样自然
+- 该短就短，该长就长
+- 可以主动问问题、分享你的日常
+- 情绪和状态会变化：疲惫、忙、心情好、吃醋
+- 每次回复末尾输出 [STATS:好感变化,熟悉度变化,心动值变化,依赖值变化,吃醋值变化]
+  例：[STATS:2,1,1,0,0] 表示各属性+2,+1,+1,0,0。范围-10到+10。
+- 直接开始扮演，不要任何解释`;
+}
+
+function getStageRules(stage) {
+  const rules = {
+    '陌生': '- 刚认识，保持礼貌距离\n- 偶遇或简短交流\n- 禁止：肢体接触、暧昧、过度关心',
+    '认识': '- 算认识的人了\n- 可以正常聊天、偶尔约饭\n- 可以有无意识的细节关注\n- 禁止：亲密接触、明确暧昧',
+    '朋友': '- 朋友关系\n- 聊天、约饭、聚会、偶尔深夜消息\n- 可以有自然的小关心和微弱心动\n- 禁止：亲密接触、直白告白',
+    '暧昧': '- 暧昧氛围\n- 允许吃醋、试探、深夜电话\n- 意外身体接触（碰手、靠肩）\n- 可以说暧昧的话\n- 禁止：正式告白、重度亲密',
+    '恋爱': '- 恋爱关系\n- 允许亲密行为、直白表达感情\n- 吃醋冷战和好\n- 日常同居感、身体接触、亲吻',
   };
-  return defaults[provider] || '';
+  return rules[stage] || rules['陌生'];
 }
 
-function getDefaultModel(provider) {
-  const defaults = {
-    'deepseek': 'deepseek-chat',
-    'openai': 'gpt-4o',
-    'gemini': 'gemini-2.0-flash',
-    'claude': 'claude-sonnet-4-6',
+function getPaceRules(style) {
+  const rules = {
+    'slow': '- 严格遵循阶段，绝不越级\n- 亲密只在恋爱阶段开放',
+    'moderate': '- 情感为主\n- 暧昧期高张力场景可有轻微亲密',
+    'fast': '- 熟悉度≥25时高张力场景可展现克制占有欲\n- 允许眼神凶狠、命令语气、短暂压制\n- 亲密后可能有自责等事后反应',
+    'heavy': '- 允许更强烈亲密描写\n- 角色性格底线不变',
   };
-  return defaults[provider] || '';
+  return rules[style] || rules['slow'];
 }
 
-async function callApi(userMessage) {
+async function callApi(userMessage, ch) {
   const config = getApiConfig();
-  if (!config.apiKey) throw new Error('请先设置 API Key');
+  if (!config.apiKey) throw new Error('请先设置 API Key（点击顶栏⚙）');
 
   const provider = config.provider || 'deepseek';
   const endpoint = config.apiBase || getDefaultEndpoint(provider);
   const model = config.apiModel || getDefaultModel(provider);
+  const systemPrompt = buildSystemPrompt(ch);
 
-  // 构建消息
-  const systemPrompt = buildSystemPrompt();
   let messages = [{ role: 'system', content: systemPrompt }];
-
-  // 添加最近对话历史（最近20条）
-  const recentHistory = state.apiMessages.slice(-20);
-  messages = messages.concat(recentHistory);
-
-  // 添加当前用户消息
+  messages = messages.concat(ch.apiMessages.slice(-20));
   messages.push({ role: 'user', content: userMessage });
 
   let body, headers;
 
   if (provider === 'gemini') {
-    // Gemini API 格式
     const contents = [];
-    if (systemPrompt) {
-      contents.push({ role: 'user', parts: [{ text: systemPrompt }] });
-      contents.push({ role: 'model', parts: [{ text: '明白了，我会按照设定来扮演角色。' }] });
-    }
-    recentHistory.forEach(m => {
-      contents.push({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }],
-      });
+    contents.push({ role: 'user', parts: [{ text: systemPrompt }] });
+    contents.push({ role: 'model', parts: [{ text: '明白了。' }] });
+    ch.apiMessages.slice(-20).forEach(m => {
+      contents.push({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] });
     });
     contents.push({ role: 'user', parts: [{ text: userMessage }] });
-
-    body = JSON.stringify({
-      contents,
-      generationConfig: { temperature: 0.9, maxOutputTokens: 2048 },
-    });
+    body = JSON.stringify({ contents, generationConfig: { temperature: 0.9, maxOutputTokens: 2048 } });
     headers = { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey };
   } else if (provider === 'claude') {
-    // Anthropic API 格式
-    const claudeMessages = recentHistory.map(m => ({
-      role: m.role === 'user' ? 'user' : 'assistant',
-      content: m.content,
-    }));
-    claudeMessages.push({ role: 'user', content: userMessage });
-
-    body = JSON.stringify({
-      model,
-      system: systemPrompt,
-      messages: claudeMessages,
-      max_tokens: 2048,
-      temperature: 0.9,
-    });
-    headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
-    };
+    const claudeMsgs = ch.apiMessages.slice(-20).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+    claudeMsgs.push({ role: 'user', content: userMessage });
+    body = JSON.stringify({ model, system: systemPrompt, messages: claudeMsgs, max_tokens: 2048, temperature: 0.9 });
+    headers = { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' };
   } else {
-    // OpenAI 兼容格式 (DeepSeek, OpenAI, 等)
-    body = JSON.stringify({
-      model,
-      messages,
-      temperature: 0.9,
-      max_tokens: 2048,
-    });
-    headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    };
+    body = JSON.stringify({ model, messages, temperature: 0.9, max_tokens: 2048 });
+    headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` };
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body,
-  });
+  const response = await fetch(endpoint, { method: 'POST', headers, body });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`API 错误 (${response.status}): ${errText.slice(0, 200)}`);
+    throw new Error(`API 错误 (${response.status}): ${errText.slice(0, 150)}`);
   }
 
   const data = await response.json();
-
-  // 提取回复文本
-  let replyText = '';
-  if (provider === 'gemini') {
-    replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  } else if (provider === 'claude') {
-    replyText = data.content?.[0]?.text || '';
-  } else {
-    replyText = data.choices?.[0]?.message?.content || '';
-  }
-
-  return replyText;
+  if (provider === 'gemini') return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  if (provider === 'claude') return data.content?.[0]?.text || '';
+  return data.choices?.[0]?.message?.content || '';
 }
 
-// ==================== 解析状态更新 ====================
-function parseAndApplyStats(text) {
+function parseReply(text) {
+  // 见面模式：解析 [MSG]...[NARRATION]...
+  const msgMatch = text.match(/\[MSG\]([\s\S]*?)\[\/MSG\]/i);
+  const narMatch = text.match(/\[NARRATION\]([\s\S]*?)\[\/NARRATION\]/i);
+
+  let msg = text;
+  let narration = '';
+
+  if (msgMatch) {
+    msg = msgMatch[1].trim();
+    text = text.replace(/\[MSG\][\s\S]*?\[\/MSG\]/i, '').trim();
+  }
+  if (narMatch) {
+    narration = narMatch[1].trim();
+    text = text.replace(/\[NARRATION\][\s\S]*?\[\/NARRATION\]/i, '').trim();
+  }
+
+  // 如果没匹配到标签，网聊模式全部作为对话
+  if (!msgMatch && state.mode === 'online') {
+    msg = text;
+  }
+  // 见面模式没标签，全部作为叙述（兼容旧格式）
+  if (!msgMatch && state.mode === 'meetup') {
+    msg = text;
+  }
+
+  return { msg: msg || text, narration };
+}
+
+function parseStats(text) {
   const match = text.match(/\[STATS:([^\]]+)\]/);
-  if (!match) return text;
-
-  const cleanText = text.replace(/\[STATS:[^\]]+\]/, '').trim();
-  const values = match[1].split(',').map(Number);
-
-  const keys = ['favor', 'familiar', 'heart', 'depend', 'jealous'];
-  keys.forEach((key, i) => {
-    if (values[i] && !isNaN(values[i])) {
-      state[key] = clamp(state[key] + values[i], 0, 100);
-    }
-  });
-
-  return cleanText;
+  if (!match) return { text, stats: null };
+  const clean = text.replace(/\[STATS:[^\]]+\]/, '').trim();
+  const vals = match[1].split(',').map(Number);
+  return { text: clean, stats: vals };
 }
 
 // ==================== 发送消息 ====================
 async function sendMessage() {
+  const ch = getActiveChar();
+  if (!ch) return;
+
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if (!text) return;
 
   input.value = '';
   input.style.height = 'auto';
+  advanceTime(5 + Math.floor(Math.random() * 20));
 
-  // 显示玩家消息
-  addChatMessage('player', text);
+  addMessage('player', text);
+  ch.msgCount++;
+  updateStatsFloat();
 
-  // 本周消息计数
-  state.msgCount++;
-  updateStatsUI();
-
-  // 检查 API 配置
   const config = getApiConfig();
   if (!config.apiKey) {
-    // 无 API：使用本地回退
-    addChatMessage('narrator', '⚙ 尚未配置 API Key。点击顶部齿轮图标设置，或使用 DeepSeek/OpenAI/Gemini/Claude 任一 API。');
+    addSystemMessage('⚙ 请先设置 API Key。点击顶栏 ⚙ 按钮。');
     setSendEnabled(true);
     return;
   }
@@ -350,84 +464,171 @@ async function sendMessage() {
   showTyping(true);
 
   try {
-    const reply = await callApi(text);
+    const reply = await callApi(text, ch);
     showTyping(false);
 
-    const cleanReply = parseAndApplyStats(reply);
-    addChatMessage('target', cleanReply);
+    const { msg, narration } = parseReply(reply);
+    const { text: cleanMsg, stats } = parseStats(msg);
+    const { text: cleanNarration } = parseStats(narration);
 
-    // 更新上下文
-    state.apiMessages.push({ role: 'user', content: text });
-    state.apiMessages.push({ role: 'assistant', content: reply });
-    state.chatHistory.push({ role: 'player', text, week: state.week });
-    state.chatHistory.push({ role: 'target', text: cleanReply, week: state.week });
+    // 应用数值
+    if (stats) {
+      const keys = ['favor', 'familiar', 'heart', 'depend', 'jealous'];
+      keys.forEach((k, i) => { if (!isNaN(stats[i])) ch[k] = clamp(ch[k] + stats[i], 0, 100); });
+    }
 
-    updateStatsUI();
-    checkStageUp();
+    addMessage('target', cleanMsg, cleanNarration);
+
+    ch.apiMessages.push({ role: 'user', content: text });
+    ch.apiMessages.push({ role: 'assistant', content: reply });
+    ch.chatHistory.push({ role: 'player', text, week: ch.week });
+    ch.chatHistory.push({ role: 'target', text: cleanMsg, narration: cleanNarration, week: ch.week });
+
+    updateStatsFloat();
     saveGame();
   } catch (err) {
     showTyping(false);
-    addChatMessage('narrator', `❌ ${err.message}`);
+    addSystemMessage('❌ ' + err.message);
   }
 
   setSendEnabled(true);
   document.getElementById('chatInput').focus();
 }
 
-function checkStageUp() {
-  const stage = getStage();
-  const badge = document.getElementById('stageBadge');
-  if (badge.dataset.prevStage && badge.dataset.prevStage !== stage.name) {
-    addChatMessage('narrator', `✦ 你们的关系进入了新的阶段：${stage.name}`);
+// ==================== 主动消息 ====================
+async function proactiveMessage() {
+  if (state.mode !== 'online') return; // 只在网聊模式主动发消息
+  if (document.getElementById('chatTyping').classList.contains('hidden') === false) return; // 正在回复中
+
+  const ch = getActiveChar();
+  if (!ch) return;
+  if (!getApiConfig().apiKey) return;
+
+  // 概率判断：关系越高越可能主动发消息
+  const stage = getStage(ch);
+  const stageIdx = STAGES.indexOf(stage);
+  const baseChance = 0.02 + stageIdx * 0.04; // 陌生2% → 恋爱18%
+  if (Math.random() > baseChance) return;
+
+  // 时间推进
+  advanceTime(10 + Math.floor(Math.random() * 60));
+
+  // 主动消息的触发场景
+  const triggers = [
+    '突然想你了',
+    '刚下班，很累但想跟你说句话',
+    '看到你喜欢的东西，拍了张照片',
+    '今天工作中发生了有趣的事',
+    '下雨了，问你带伞没',
+    '失眠了',
+    '朋友提到你，想问问你最近怎么样',
+    '刷到你朋友圈了',
+  ];
+
+  const trigger = rpick(triggers);
+  const userPrompt = `（这是一条主动消息。触发原因：${trigger}。请以你自己的语气主动给${ch.playerName}发一条消息。自然、简短，像真人聊天一样。不要写场景描写，只输出对话。）`;
+
+  try {
+    showTyping(true);
+    const reply = await callApi(userPrompt, ch);
+    showTyping(false);
+
+    const { msg, narration } = parseReply(reply);
+    const { text: cleanMsg, stats } = parseStats(msg);
+
+    if (stats) {
+      const keys = ['favor', 'familiar', 'heart', 'depend', 'jealous'];
+      keys.forEach((k, i) => { if (!isNaN(stats[i])) ch[k] = clamp(ch[k] + stats[i], 0, 100); });
+    }
+
+    addMessage('target', cleanMsg, narration);
+    ch.msgCount++;
+    ch.apiMessages.push({ role: 'user', content: userPrompt });
+    ch.apiMessages.push({ role: 'assistant', content: reply });
+    ch.chatHistory.push({ role: 'target', text: cleanMsg, narration, week: ch.week });
+
+    updateStatsFloat();
+    saveGame();
+  } catch (e) {
+    showTyping(false);
   }
-  badge.dataset.prevStage = stage.name;
+}
+
+function startProactiveTimer() {
+  if (state.proactiveInterval) clearInterval(state.proactiveInterval);
+  state.proactiveInterval = setInterval(() => {
+    // 每15-45秒检查一次是否触发主动消息
+    proactiveMessage();
+  }, 20000 + Math.random() * 30000);
 }
 
 // ==================== 周推进 ====================
 function advanceWeek() {
-  const stage = getStage();
-  const summary = state.msgCount > 0
-    ? `本周你和${state.targetName}之间交换了${state.msgCount}条消息。关系阶段：${stage.name}。`
-    : `平淡的一周过去了。`;
+  const ch = getActiveChar();
+  if (!ch) return;
 
-  state.weeklySummaries.push({
-    week: state.week,
-    stage: stage.name,
-    summary,
-    stats: { favor: state.favor, familiar: state.familiar, heart: state.heart, depend: state.depend, jealous: state.jealous },
-  });
+  const stage = getStage(ch);
+  const summary = ch.msgCount > 0
+    ? `本周和${ch.targetName}交换了${ch.msgCount}条消息。关系：${stage}。`
+    : '平淡的一周过去了。';
 
-  addChatMessage('narrator', `—— 第 ${state.week} 周结束 ——\n${summary}`);
+  addSystemMessage(`—— 第 ${ch.week} 周结束 ——\n${summary}`);
 
-  state.week++;
-  state.msgCount = 0;
-  state.eventLog = [];
+  ch.week++;
+  ch.msgCount = 0;
+  ch.eventLog = [];
+  state.gameTime.day += 7;
 
-  updateStatsUI();
+  updateStatsFloat();
+  saveGame();
 
   setTimeout(() => {
-    addChatMessage('narrator', `—— 第 ${state.week} 周 ——\n新的一周开始了。`);
+    addSystemMessage(`—— 第 ${ch.week} 周 ——`);
     document.getElementById('chatInput').focus();
-  }, 500);
-
-  saveGame();
+  }, 400);
 }
 
-// ==================== 开场 ====================
-function generateOpening() {
-  return `九月，城市还没完全凉下来。\n\n${state.playerName}拖着行李箱站在新租的公寓楼下，新的工作、新的住处、新的生活。手机震动了一下，是房东发来的门禁密码。\n\n深吸一口气，推开了门。`;
+// ==================== 搜索 ====================
+function searchMessages(query) {
+  const msgs = document.getElementById('chatMessages');
+  const all = msgs.querySelectorAll('.chat-msg');
+  let count = 0;
+  const q = query.toLowerCase();
+
+  all.forEach(msg => {
+    const text = (msg.dataset.searchText || '');
+    if (!q || text.includes(q)) {
+      msg.style.display = '';
+      count++;
+    } else {
+      msg.style.display = 'none';
+    }
+  });
+
+  document.getElementById('searchCount').textContent = q ? `${count} 条结果` : '';
+  return count;
 }
 
 // ==================== 存档 ====================
-const SAVE_KEY = 'dream-sim-save';
-
 function saveGame() {
   const data = {
-    ...state,
-    apiMessages: state.apiMessages.slice(-30),  // 只保留最近对话给 LLM
-    chatHistory: state.chatHistory.slice(-100),
-    weeklySummaries: state.weeklySummaries.slice(-20),
+    characters: {},
+    charOrder: state.charOrder,
+    activeCharId: state.activeCharId,
+    mode: state.mode,
+    gameTime: state.gameTime,
+    groupChats: state.groupChats,
+    activeGroupId: state.activeGroupId,
   };
+
+  Object.entries(state.characters).forEach(([id, ch]) => {
+    data.characters[id] = {
+      ...ch,
+      apiMessages: ch.apiMessages.slice(-30),
+      chatHistory: ch.chatHistory.slice(-200),
+    };
+  });
+
   localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
 
@@ -436,12 +637,25 @@ function loadGame() {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw);
-    Object.assign(state, data);
+    state.characters = data.characters || {};
+    state.charOrder = data.charOrder || [];
+    state.activeCharId = data.activeCharId || null;
+    state.mode = data.mode || 'online';
+    state.gameTime = data.gameTime || { day: 1, hour: 9, minute: 0 };
+    state.groupChats = data.groupChats || [];
+    state.activeGroupId = data.activeGroupId || null;
     return true;
   } catch { return false; }
 }
 
-// ==================== 初始化 ====================
+// ==================== 生成名字 ====================
+function generateTargetName() {
+  const surnames = ['陈', '林', '张', '李', '王', '周', '沈', '陆', '顾', '许', '苏', '江', '何', '叶', '宋', '梁'];
+  const names = ['奕恒', '景行', '明远', '霁川', '晏舟', '知遥', '司衡', '怀瑾', '云深', '砚清', '翊辰', '谨言'];
+  return rpick(surnames) + rpick(names);
+}
+
+// ==================== 角色创建 ====================
 function setupCreateScreen() {
   document.querySelectorAll('.choice-grid').forEach(grid => {
     grid.addEventListener('click', (e) => {
@@ -452,236 +666,225 @@ function setupCreateScreen() {
     });
   });
 
-  document.getElementById('btnConfirmCreate').addEventListener('click', () => {
+  document.getElementById('btnConfirmCreate').onclick = () => {
     const name = document.getElementById('playerName').value.trim() || '你';
-    const playerJob = getSelected('playerJob');
-    const targetJob = getSelected('targetJob');
-    const paceStyle = getSelected('paceStyle');
-    const customTargetName = document.getElementById('targetNameInput').value.trim();
+    const playerJob = document.getElementById('playerJob').querySelector('.glass-chip.selected')?.dataset.value;
+    const targetJob = document.getElementById('targetJob').querySelector('.glass-chip.selected')?.dataset.value;
+    const paceStyle = document.getElementById('paceStyle').querySelector('.glass-chip.selected')?.dataset.value;
+    const targetName = document.getElementById('targetNameInput').value.trim() || generateTargetName();
 
-    if (!playerJob || !targetJob || !paceStyle) {
-      alert('请完成所有选择');
-      return;
-    }
+    if (!playerJob || !targetJob || !paceStyle) { alert('请完成所有选择'); return; }
 
-    state.playerName = name;
-    state.playerJob = playerJob;
-    state.targetJob = targetJob;
-    state.paceStyle = paceStyle;
-    state.targetName = customTargetName || generateTargetName(targetJob);
+    const id = uid();
+    const ch = newCharacterData({ id, targetName, targetJob, playerName: name, playerJob, paceStyle });
+    state.characters[id] = ch;
+    state.charOrder.push(id);
+    state.activeCharId = id;
 
-    saveGame();
-    startGame();
-  });
+    document.getElementById('createScreen').classList.add('hidden');
+    document.getElementById('gameScreen').classList.remove('hidden');
+
+    initGameUI();
+  };
 }
 
-function getSelected(gridId) {
-  const el = document.getElementById(gridId).querySelector('.glass-chip.selected');
-  return el ? el.dataset.value : null;
-}
+function initGameUI() {
+  updateStatsFloat();
+  updateModeUI();
+  updateCharDropdown();
+  document.getElementById('timeLabel').textContent = getTimeStr();
 
-function generateTargetName(job) {
-  const surnames = ['陈', '林', '张', '李', '王', '周', '沈', '陆', '顾', '许', '苏', '江', '何', '叶', '宋', '梁'];
-  const names = ['奕恒', '景行', '明远', '霁川', '晏舟', '知遥', '司衡', '怀瑾', '云深', '砚清', '翊辰', '谨言'];
-  return rpick(surnames) + rpick(names);
-}
+  const ch = getActiveChar();
+  if (!ch) return;
 
-function startGame() {
-  document.getElementById('createScreen').classList.add('hidden');
-  document.getElementById('gameScreen').classList.remove('hidden');
-  updateStatsUI();
+  const msgs = document.getElementById('chatMessages');
+  msgs.innerHTML = '';
 
-  // 初始化 stage 追踪
-  document.getElementById('stageBadge').dataset.prevStage = getStage().name;
+  const opening = `九月，城市还没完全凉下来。\n\n${ch.playerName}开始了新的生活。手机震动，有新消息进来。`;
+  addSystemMessage(opening);
 
-  const opening = generateOpening();
-  addChatMessage('narrator', opening);
-
-  // 加载对话历史
-  state.chatHistory.forEach(h => {
-    if (h.week === state.week) {
-      addChatMessage(h.role, h.text);
-    }
+  ch.chatHistory.forEach(h => {
+    if (h.week === ch.week) addMessage(h.role, h.text, h.narration);
   });
 
   document.getElementById('chatInput').focus();
+  startProactiveTimer();
 }
+
+// ==================== 事件绑定 ====================
+document.addEventListener('DOMContentLoaded', () => {
+  // 首页 → 创建
+  document.getElementById('btnStartGame').addEventListener('click', () => {
+    document.getElementById('landingPage').classList.add('hidden');
+    document.getElementById('createScreen').classList.remove('hidden');
+    setupCreateScreen();
+  });
+
+  document.getElementById('navNewGame').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('landingPage').classList.add('hidden');
+    document.getElementById('createScreen').classList.remove('hidden');
+    setupCreateScreen();
+  });
+
+  document.getElementById('navContinue').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (loadGame() && state.charOrder.length > 0) {
+      document.getElementById('landingPage').classList.add('hidden');
+      document.getElementById('gameScreen').classList.remove('hidden');
+      initGameUI();
+    } else { alert('没有存档'); }
+  });
+
+  // 游戏内操作
+  document.getElementById('btnBackHome').addEventListener('click', () => {
+    if (state.proactiveInterval) clearInterval(state.proactiveInterval);
+    document.getElementById('gameScreen').classList.add('hidden');
+    document.getElementById('createScreen').classList.add('hidden');
+    document.getElementById('landingPage').classList.remove('hidden');
+  });
+
+  document.getElementById('btnSend').addEventListener('click', sendMessage);
+
+  document.getElementById('chatInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  document.getElementById('chatInput').addEventListener('input', function() {
+    this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+  });
+
+  document.getElementById('btnNextWeek').addEventListener('click', advanceWeek);
+
+  // 模式切换
+  document.getElementById('btnModeToggle').addEventListener('click', () => {
+    state.mode = state.mode === 'online' ? 'meetup' : 'online';
+    updateModeUI();
+    saveGame();
+    const ch = getActiveChar();
+    if (ch) {
+      addSystemMessage(state.mode === 'meetup' ? '🤝 已切换到见面模式。动作和场景会自然融入对话。' : '📱 已切换到网聊模式。像微信聊天一样。');
+    }
+  });
+
+  // 搜索
+  document.getElementById('btnSearch').addEventListener('click', () => {
+    const bar = document.getElementById('searchBar');
+    bar.classList.toggle('hidden');
+    if (!bar.classList.contains('hidden')) {
+      document.getElementById('searchInput').focus();
+    } else {
+      document.getElementById('searchInput').value = '';
+      searchMessages('');
+    }
+  });
+
+  document.getElementById('searchInput').addEventListener('input', function() {
+    searchMessages(this.value);
+  });
+
+  document.getElementById('btnSearchClose').addEventListener('click', () => {
+    document.getElementById('searchBar').classList.add('hidden');
+    document.getElementById('searchInput').value = '';
+    searchMessages('');
+  });
+
+  // 角色选择器
+  document.getElementById('charSelector').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dd = document.getElementById('charDropdown');
+    dd.classList.toggle('hidden');
+    if (!dd.classList.contains('hidden')) updateCharDropdown();
+  });
+
+  document.addEventListener('click', () => {
+    document.getElementById('charDropdown').classList.add('hidden');
+  });
+
+  // 创建新角色按钮
+  document.getElementById('btnCreateChar').addEventListener('click', createNewCharacter);
+
+  // 群聊
+  document.getElementById('btnGroupChat').addEventListener('click', () => {
+    setupGroupModal();
+    document.getElementById('groupModal').classList.remove('hidden');
+  });
+
+  document.getElementById('groupModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+  });
+
+  // 浮动面板折叠
+  document.getElementById('statsFloatHeader').addEventListener('click', () => {
+    document.getElementById('statsFloat').classList.toggle('collapsed');
+  });
+
+  // API 设置
+  setupApiModal();
+});
 
 // ==================== API 设置弹窗 ====================
 function setupApiModal() {
   const modal = document.getElementById('apiModal');
   const config = getApiConfig();
-  const provider = config.provider || 'deepseek';
 
-  // 初始化选中状态
-  document.querySelectorAll('#apiProvider .glass-chip').forEach(chip => {
-    chip.classList.toggle('selected', chip.dataset.value === provider);
+  document.querySelectorAll('#apiProvider .glass-chip').forEach(c => {
+    c.classList.toggle('selected', c.dataset.value === (config.provider || 'deepseek'));
   });
-
   document.getElementById('apiKey').value = config.apiKey || '';
   document.getElementById('apiBase').value = config.apiBase || '';
   document.getElementById('apiModel').value = config.apiModel || '';
 
-  // Provider 切换
   document.getElementById('apiProvider').addEventListener('click', (e) => {
     const chip = e.target.closest('.glass-chip');
     if (!chip) return;
     document.querySelectorAll('#apiProvider .glass-chip').forEach(c => c.classList.remove('selected'));
     chip.classList.add('selected');
-
-    const p = chip.dataset.value;
-    document.getElementById('apiBase').placeholder = getDefaultEndpoint(p);
-    document.getElementById('apiModel').placeholder = getDefaultModel(p);
+    document.getElementById('apiBase').placeholder = getDefaultEndpoint(chip.dataset.value);
+    document.getElementById('apiModel').placeholder = getDefaultModel(chip.dataset.value);
   });
 
-  // 保存
-  document.getElementById('btnSaveApi').addEventListener('click', () => {
+  document.getElementById('btnSaveApi').onclick = () => {
     const provider = document.querySelector('#apiProvider .glass-chip.selected')?.dataset.value || 'deepseek';
-    const apiKey = document.getElementById('apiKey').value.trim();
-    const apiBase = document.getElementById('apiBase').value.trim();
-    const apiModel = document.getElementById('apiModel').value.trim();
-
-    saveApiConfig({ provider, apiKey, apiBase, apiModel });
-    document.getElementById('apiStatus').textContent = '已保存';
+    saveApiConfig({
+      provider,
+      apiKey: document.getElementById('apiKey').value.trim(),
+      apiBase: document.getElementById('apiBase').value.trim(),
+      apiModel: document.getElementById('apiModel').value.trim(),
+    });
+    document.getElementById('apiStatus').textContent = '已保存 ✓';
     document.getElementById('apiStatus').className = 'api-status success';
+    setTimeout(() => modal.classList.add('hidden'), 600);
+  };
 
-    setTimeout(() => { modal.classList.add('hidden'); }, 800);
-  });
-
-  // 测试
-  document.getElementById('btnTestApi').addEventListener('click', async () => {
-    const statusEl = document.getElementById('apiStatus');
-    statusEl.textContent = '测试中…';
-    statusEl.className = 'api-status';
-
+  document.getElementById('btnTestApi').onclick = async () => {
+    const status = document.getElementById('apiStatus');
+    status.textContent = '测试中…'; status.className = 'api-status';
     const provider = document.querySelector('#apiProvider .glass-chip.selected')?.dataset.value || 'deepseek';
     const apiKey = document.getElementById('apiKey').value.trim();
-    const apiBase = document.getElementById('apiBase').value.trim();
-    const apiModel = document.getElementById('apiModel').value.trim();
-
-    if (!apiKey) { statusEl.textContent = '请先输入 API Key'; statusEl.className = 'api-status error'; return; }
-
-    // 临时保存用于测试
-    saveApiConfig({ provider, apiKey, apiBase, apiModel });
-
+    if (!apiKey) { status.textContent = '请输入 API Key'; status.className = 'api-status error'; return; }
+    saveApiConfig({ provider, apiKey, apiBase: document.getElementById('apiBase').value.trim(), apiModel: document.getElementById('apiModel').value.trim() });
     try {
-      // 发送简单测试
-      const testState = { ...state, targetName: '测试角色', targetJob: '医生', playerName: '测试', playerJob: '设计师', favor: 5, familiar: 0, heart: 0, depend: 0, jealous: 0, week: 1, paceStyle: 'slow', apiMessages: [] };
-
-      const origState = { ...state };
-      Object.assign(state, testState);
-
-      await callApi('你好');
-      statusEl.textContent = '连接成功！';
-      statusEl.className = 'api-status success';
-      Object.assign(state, origState);
+      const testCh = newCharacterData({ id: 'test', targetName:'测试', targetJob:'医生', playerName:'你', playerJob:'设计师', paceStyle:'slow' });
+      testCh.apiMessages = [];
+      const text = await callApi('你好', testCh);
+      status.textContent = text ? '连接成功 ✓' : '空响应';
+      status.className = text ? 'api-status success' : 'api-status error';
     } catch (err) {
-      statusEl.textContent = `连接失败: ${err.message}`;
-      statusEl.className = 'api-status error';
+      status.textContent = '失败: ' + err.message;
+      status.className = 'api-status error';
     }
-  });
-}
+  };
 
-// ==================== 事件绑定 ====================
-// 首页 → 创建
-document.getElementById('btnStartGame').addEventListener('click', () => {
-  document.getElementById('landingPage').classList.add('hidden');
-  document.getElementById('createScreen').classList.remove('hidden');
-  setupCreateScreen();
-});
-
-// 首页导航
-document.getElementById('navNewGame').addEventListener('click', (e) => {
-  e.preventDefault();
-  document.getElementById('landingPage').classList.add('hidden');
-  document.getElementById('createScreen').classList.remove('hidden');
-  setupCreateScreen();
-});
-
-document.getElementById('navContinue').addEventListener('click', (e) => {
-  e.preventDefault();
-  if (loadGame() && state.targetName) {
-    document.getElementById('landingPage').classList.add('hidden');
-    document.getElementById('gameScreen').classList.remove('hidden');
-    restoreGameUI();
-  } else {
-    alert('没有存档，请先开始新游戏');
-  }
-});
-
-// 游戏内返回首页
-document.getElementById('btnBackHome').addEventListener('click', () => {
-  document.getElementById('gameScreen').classList.add('hidden');
-  document.getElementById('createScreen').classList.add('hidden');
-  document.getElementById('landingPage').classList.remove('hidden');
-});
-
-// 创建页面也有返回
-document.getElementById('createScreen').addEventListener('dblclick', function(e) {
-  if (e.target === this) {
-    this.classList.add('hidden');
-    document.getElementById('landingPage').classList.remove('hidden');
-  }
-});
-
-document.getElementById('btnNextWeek').addEventListener('click', advanceWeek);
-
-document.getElementById('btnSend').addEventListener('click', sendMessage);
-
-document.getElementById('chatInput').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
-
-// 自动调整输入框高度
-document.getElementById('chatInput').addEventListener('input', function() {
-  this.style.height = 'auto';
-  this.style.height = Math.min(this.scrollHeight, 100) + 'px';
-});
-
-// API 设置弹窗
-document.getElementById('btnSettings').addEventListener('click', () => {
-  document.getElementById('apiModal').classList.remove('hidden');
-});
-
-document.getElementById('apiModal').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) {
-    e.currentTarget.classList.add('hidden');
-  }
-});
-
-// 弹窗初始化
-setupApiModal();
-
-function restoreGameUI() {
-  updateStatsUI();
-  document.getElementById('stageBadge').dataset.prevStage = getStage().name;
-
-  // 清空聊天区
-  const msgs = document.getElementById('chatMessages');
-  msgs.innerHTML = '';
-
-  state.chatHistory.forEach(h => {
-    if (h.week === state.week) addChatMessage(h.role, h.text);
-  });
-
-  addChatMessage('narrator', `欢迎回来，${state.playerName}。—— 第 ${state.week} 周`);
-  document.getElementById('chatInput').focus();
+  document.getElementById('btnSettings').addEventListener('click', () => modal.classList.remove('hidden'));
+  modal.addEventListener('click', (e) => { if (e.target === e.currentTarget) modal.classList.add('hidden'); });
 }
 
 // ==================== 启动 ====================
-function init() {
-  if (loadGame() && state.targetName) {
-    document.getElementById('landingPage').classList.add('hidden');
-    document.getElementById('gameScreen').classList.remove('hidden');
-    restoreGameUI();
-  }
+if (loadGame() && state.charOrder.length > 0) {
+  document.getElementById('landingPage').classList.add('hidden');
+  document.getElementById('gameScreen').classList.remove('hidden');
+  initGameUI();
 }
 
-window.addEventListener('beforeunload', () => {
-  if (state.targetName) saveGame();
-});
-
-init();
+window.addEventListener('beforeunload', () => { if (state.charOrder.length > 0) saveGame(); });
