@@ -393,6 +393,48 @@ function switchToGroup(groupId) {
   document.getElementById('chatInput').focus();
 }
 
+function deleteCharacter(charId) {
+  const ch = state.characters[charId];
+  if (!ch) return;
+
+  // 从群聊中移除该角色，如果群聊成员不足2人则删除整个群聊
+  state.groupChats = state.groupChats.filter(g => {
+    g.members = g.members.filter(id => id !== charId);
+    return g.members.length >= 2;
+  });
+
+  // 清理引用
+  delete state.characters[charId];
+  state.charOrder = state.charOrder.filter(id => id !== charId);
+
+  // 如果删除的是当前活跃角色，切换到第一个
+  if (state.activeCharId === charId) {
+    state.activeCharId = state.charOrder[0] || null;
+    state.activeGroupId = null;
+  }
+
+  // 如果删除的是当前群聊的成员，退出群聊
+  if (state.activeGroupId) {
+    const group = state.groupChats.find(g => g.id === state.activeGroupId);
+    if (!group) {
+      state.activeGroupId = null;
+      state.activeCharId = state.charOrder[0] || null;
+    }
+  }
+
+  saveGame();
+
+  if (state.charOrder.length === 0) {
+    // 所有角色都删了，回到首页
+    document.getElementById('gameScreen').classList.add('hidden');
+    document.getElementById('landingPage').classList.remove('hidden');
+    if (state.proactiveInterval) clearInterval(state.proactiveInterval);
+    if (state.timeTicker) clearInterval(state.timeTicker);
+  } else if (state.activeCharId) {
+    switchCharacter(state.activeCharId);
+  }
+}
+
 function createNewCharacter() {
   // 回到创建页
   document.getElementById('gameScreen').classList.add('hidden');
@@ -410,11 +452,36 @@ function updateCharDropdown() {
   Object.values(state.characters).forEach(ch => {
     const div = document.createElement('div');
     div.className = 'char-dropdown-item' + (ch.id === state.activeCharId && !state.activeGroupId ? ' active' : '');
-    div.textContent = `${ch.targetName} · ${getStage(ch)}`;
-    div.addEventListener('click', () => {
+    div.style.display = 'flex';
+    div.style.justifyContent = 'space-between';
+    div.style.alignItems = 'center';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = `${ch.targetName} · ${getStage(ch)}`;
+    nameSpan.style.flex = '1';
+    nameSpan.style.cursor = 'pointer';
+    nameSpan.addEventListener('click', (e) => {
+      e.stopPropagation();
       switchCharacter(ch.id);
       dropdown.classList.add('hidden');
     });
+    div.appendChild(nameSpan);
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕';
+    delBtn.style.background = 'none';
+    delBtn.style.border = 'none';
+    delBtn.style.color = 'var(--brown-light)';
+    delBtn.style.cursor = 'pointer';
+    delBtn.style.fontSize = '0.8rem';
+    delBtn.style.padding = '0 4px';
+    delBtn.style.opacity = '0.5';
+    delBtn.title = '删除角色';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!confirm(`确定删除「${ch.targetName}」吗？此操作不可恢复。`)) return;
+      deleteCharacter(ch.id);
+      dropdown.classList.add('hidden');
+    });
+    div.appendChild(delBtn);
     dropdown.appendChild(div);
   });
 
@@ -442,6 +509,31 @@ function updateCharDropdown() {
     createNewCharacter();
   });
   dropdown.appendChild(addDiv);
+
+  // 删除全部角色
+  if (state.charOrder.length > 0) {
+    const delAll = document.createElement('div');
+    delAll.className = 'char-dropdown-item';
+    delAll.style.opacity = '0.5';
+    delAll.style.color = '#c0392b';
+    delAll.textContent = `✕ 删除全部角色 (${state.charOrder.length})`;
+    delAll.addEventListener('click', () => {
+      dropdown.classList.add('hidden');
+      if (!confirm(`确定删除全部 ${state.charOrder.length} 个角色吗？此操作不可恢复。`)) return;
+      // 批量清除
+      state.characters = {};
+      state.charOrder = [];
+      state.activeCharId = null;
+      state.activeGroupId = null;
+      state.groupChats = [];
+      saveGame();
+      document.getElementById('gameScreen').classList.add('hidden');
+      document.getElementById('landingPage').classList.remove('hidden');
+      if (state.proactiveInterval) clearInterval(state.proactiveInterval);
+      if (state.timeTicker) clearInterval(state.timeTicker);
+    });
+    dropdown.appendChild(delAll);
+  }
 }
 
 // ==================== 群聊 ====================
