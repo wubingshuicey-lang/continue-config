@@ -1567,7 +1567,13 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('landingPage').classList.add('hidden');
       document.getElementById('gameScreen').classList.remove('hidden');
       initGameUI();
-    } else { alert('没有存档'); }
+    } else { alert('没有本地存档，请点「导入存档」选择 save.json 文件'); }
+  });
+
+  // 首页导入存档
+  document.getElementById('navImport').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('importFileInput').click();
   });
 
   // 游戏内操作
@@ -1765,19 +1771,11 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         loadFromJSON(raw);
         localStorage.setItem(SAVE_KEY, raw);
-        addSystemMessage('📤 存档已导入成功！刷新页面即可看到角色');
-        updateStatsFloat();
-        updateCharDropdown();
-
-        const ch = getActiveChar();
-        const msgs = document.getElementById('chatMessages');
-        msgs.innerHTML = '';
-        if (ch) {
-          ch.chatHistory.forEach(h => {
-            if (h.week === ch.week) addMessage(h.role, h.text, h.extra || h.narration, null, h.msgType);
-          });
-        }
-        saveGame();
+        addSystemMessage('📤 存档已导入成功！');
+        document.getElementById('landingPage').classList.add('hidden');
+        document.getElementById('createScreen').classList.add('hidden');
+        document.getElementById('gameScreen').classList.remove('hidden');
+        initGameUI();
       } catch (err) {
         addSystemMessage('❌ 导入失败：' + err.message);
         console.error(err);
