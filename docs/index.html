@@ -177,6 +177,23 @@
         </div>
       </div>
 
+      <div class="create-section">
+        <label>角色音色（TTS 语音）</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:120px;">
+            <span style="font-size:0.7rem;color:var(--text-dim);">音调 Pitch</span>
+            <input type="range" id="voicePitch" min="0.5" max="2" step="0.05" value="1" style="width:100%;accent-color:var(--accent);">
+            <span style="font-size:0.65rem;color:var(--text-dim);" id="voicePitchLabel">1.0（默认）</span>
+          </div>
+          <div style="flex:1;min-width:120px;">
+            <span style="font-size:0.7rem;color:var(--text-dim);">语速 Rate</span>
+            <input type="range" id="voiceRate" min="0.6" max="1.5" step="0.05" value="0.95" style="width:100%;accent-color:var(--accent);">
+            <span style="font-size:0.65rem;color:var(--text-dim);" id="voiceRateLabel">0.95（正常）</span>
+          </div>
+        </div>
+        <p style="font-size:0.62rem;color:var(--text-dim);margin-top:6px;">男角建议 Pitch 0.8-1.1、女角 1.1-1.5。语速低于 1 更自然。</p>
+      </div>
+
       <button class="btn-start" id="btnConfirmCreate">确认 · 进入游戏</button>
     </div>
   </div>

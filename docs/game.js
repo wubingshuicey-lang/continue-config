@@ -44,6 +44,7 @@ function newCharacterData(cfg) {
     apiMessages: [],
     eventLog: [],
     completedScenarios: [],
+    voiceConfig: { pitch: 1.0, rate: 0.95 },
     createdAt: Date.now(),
   };
 }
@@ -700,12 +701,16 @@ function addMessage(role, text, extra, senderName, msgType) {
 
   // 按消息类型渲染
   if (msgType === 'voice') {
-    const dur = Math.floor(Math.random() * 25) + 5;
-    html += `<div class="msg-voice" style="${bubbleStyle}">
-      <span class="msg-voice-icon">🔊</span>
-      <div class="msg-voice-bars">${'<div class="voice-bar"></div>'.repeat(7)}</div>
-      <span class="msg-voice-dur">${dur}″</span>
-    </div>`;
+    var dur = Math.floor(Math.random() * 25) + 5;
+    var hasText = text && text.trim() && text.trim().length > 0;
+    var voiceText = hasText ? escapeHtml(text) : '';
+    var playBtn = hasText ? '<button class="voice-play-btn" data-text="' + escapeHtmlAttr(text) + '">▶</button>' : '';
+    html += '<div class="msg-voice' + (hasText ? ' has-text' : '') + '" style="' + bubbleStyle + '">' +
+      '<span class="msg-voice-icon">🔊</span>' +
+      '<div class="msg-voice-bars">' + '<div class="voice-bar"></div>'.repeat(7) + '</div>' +
+      '<span class="msg-voice-dur">' + dur + '″</span>' +
+      playBtn +
+    '</div>';
   } else if (msgType === 'image') {
     html += `<div class="msg-image"><img src="${escapeHtml(text)}" alt="图片" loading="lazy"></div>`;
   } else if (msgType === 'sticker') {
@@ -1198,8 +1203,93 @@ function sendImageMessage(dataUrl) {
   }
 }
 
+// ==================== TTS 语音引擎 ====================
+var _ttsPlaying = null; // 当前正在播放的语音元素
+
+// 为角色选择合适的语音
+function selectVoiceForChar(ch) {
+  var voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+
+  var cfg = ch && ch.voiceConfig ? ch.voiceConfig : { pitch: 1.0, rate: 0.95 };
+  var targetGender = (ch && ch.targetGender) || '男';
+  var isMale = targetGender === '男' || targetGender === '跨性别男';
+
+  // 优先匹配性别+语言
+  var candidates = voices.filter(function(v) {
+    return v.lang.startsWith('zh');
+  });
+  if (candidates.length === 0) candidates = voices;
+
+  // 按性别筛选
+  var gendered = candidates.filter(function(v) {
+    var name = v.name.toLowerCase();
+    if (isMale) return name.includes('male') || name.includes('男') || name.includes('tian') || name.includes('kefu');
+    return name.includes('female') || name.includes('女') || name.includes('xia') || name.includes('ya');
+  });
+
+  var picked = gendered.length > 0 ? gendered[0] : candidates[0];
+  return picked;
+}
+
+// TTS 播放
+function speakText(text, ch) {
+  if (!text || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel(); // 停止之前的播放
+
+  var cfg = (ch && ch.voiceConfig) ? ch.voiceConfig : { pitch: 1.0, rate: 0.95 };
+  var utterance = new SpeechSynthesisUtterance(text);
+  utterance.pitch = cfg.pitch || 1.0;
+  utterance.rate = cfg.rate || 0.95;
+  utterance.volume = 1.0;
+
+  if (ch) {
+    var voice = selectVoiceForChar(ch);
+    if (voice) utterance.voice = voice;
+  }
+
+  window.speechSynthesis.speak(utterance);
+  return utterance;
+}
+
+// 播放语音消息（带 UI 反馈）
+function playVoiceMessage(el, text, ch) {
+  if (!text || !window.speechSynthesis) return;
+
+  // 如果正在播放则停止
+  if (_ttsPlaying) {
+    window.speechSynthesis.cancel();
+    if (_ttsPlaying.el) _ttsPlaying.el.classList.remove('playing');
+    if (_ttsPlaying === el) { _ttsPlaying = null; return; }
+  }
+
+  el.classList.add('playing');
+  var utterance = speakText(text, ch);
+  _ttsPlaying = { el: el, utterance: utterance };
+
+  utterance.onend = function() {
+    el.classList.remove('playing');
+    _ttsPlaying = null;
+  };
+  utterance.onerror = function() {
+    el.classList.remove('playing');
+    _ttsPlaying = null;
+  };
+}
+
+// 确保语音列表加载（Chrome 需要异步）
+function ensureVoices() {
+  return new Promise(function(resolve) {
+    var voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) { resolve(voices); return; }
+    window.speechSynthesis.onvoiceschanged = function() {
+      resolve(window.speechSynthesis.getVoices());
+    };
+  });
+}
+
 function sendVoiceMessage() {
-  const ch = getActiveChar();
+  var ch = getActiveChar();
   if (!ch && !state.activeGroupId) { alert('请先选择角色'); return; }
 
   advanceTime(1 + Math.floor(Math.random() * 2));
@@ -1961,6 +2051,7 @@ function loadFromJSON(jsonStr) {
     ch.personalityTraits = ch.personalityTraits || extractTraits(ch.persona);
     ch.personalityDims = ch.personalityDims || inferPersonalityDims(ch.persona, ch.paceStyle);
     if (ch.moodTrend === undefined) ch.moodTrend = 0;
+    if (!ch.voiceConfig) ch.voiceConfig = { pitch: 1.0, rate: 0.95 };
     if (!ch.createdAt) ch.createdAt = Date.now();
   });
 
@@ -1982,6 +2073,7 @@ function mergeFromJSON(jsonStr) {
     ch.kinks = ch.kinks || [];
     ch.persona = ch.persona || '';
     ch.chatHistory = ch.chatHistory || [];
+    if (!ch.voiceConfig) ch.voiceConfig = { pitch: 1.0, rate: 0.95 };
     if (!ch.createdAt) ch.createdAt = Date.now();
   });
 
@@ -2075,7 +2167,33 @@ function setupCreateScreen() {
   if (_createDelegated) return;
   _createDelegated = true;
 
-  const container = document.getElementById('createScreen');
+  // 音色滑块实时更新标签
+  var pitchSlider = document.getElementById('voicePitch');
+  var rateSlider = document.getElementById('voiceRate');
+  if (pitchSlider) {
+    pitchSlider.addEventListener('input', function() {
+      var v = parseFloat(this.value);
+      var label = document.getElementById('voicePitchLabel');
+      if (label) {
+        if (v < 0.8) label.textContent = v.toFixed(2) + '（低沉）';
+        else if (v > 1.3) label.textContent = v.toFixed(2) + '（偏高）';
+        else label.textContent = v.toFixed(2) + '（默认）';
+      }
+    });
+  }
+  if (rateSlider) {
+    rateSlider.addEventListener('input', function() {
+      var v = parseFloat(this.value);
+      var label = document.getElementById('voiceRateLabel');
+      if (label) {
+        if (v < 0.8) label.textContent = v.toFixed(2) + '（慢）';
+        else if (v > 1.2) label.textContent = v.toFixed(2) + '（快）';
+        else label.textContent = v.toFixed(2) + '（正常）';
+      }
+    });
+  }
+
+  var container = document.getElementById('createScreen');
 
   // 统一委托：处理所有 choice-grid 中的 glass-chip 点击
   container.addEventListener('click', (e) => {
@@ -2166,8 +2284,13 @@ function setupCreateScreen() {
 
     if (!playerJob || !targetJob || !paceStyle) { alert('请完成所有选择'); return; }
 
-    const id = uid();
-    const ch = newCharacterData({ id, targetName, targetJob, targetGender, playerName: name, playerJob, playerGender, paceStyle, persona, kinks });
+    // 读取音色设置
+    var voicePitch = parseFloat(document.getElementById('voicePitch').value) || 1.0;
+    var voiceRate = parseFloat(document.getElementById('voiceRate').value) || 0.95;
+
+    var id = uid();
+    var ch = newCharacterData({ id, targetName, targetJob, targetGender, playerName: name, playerJob, playerGender, paceStyle, persona, kinks });
+    ch.voiceConfig = { pitch: voicePitch, rate: voiceRate };
     state.characters[id] = ch;
     state.charOrder.push(id);
     state.activeCharId = id;
@@ -2440,6 +2563,10 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+function escapeHtmlAttr(str) {
+  return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function hashCode(str) {
   var hash = 0;
   for (var i = 0; i < str.length; i++) {
@@ -2545,8 +2672,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // 语音消息
-  document.getElementById('btnVoice').addEventListener('click', () => {
+  document.getElementById('btnVoice').addEventListener('click', function() {
     sendVoiceMessage();
+  });
+
+  // 语音消息播放（事件委托）
+  document.getElementById('chatMessages').addEventListener('click', function(e) {
+    var voiceEl = e.target.closest('.msg-voice');
+    if (!voiceEl) return;
+    // 如果有文字内容（AI发的语音），播放TTS
+    var playBtn = voiceEl.querySelector('.voice-play-btn');
+    if (playBtn) {
+      var text = playBtn.getAttribute('data-text');
+      var ch = getActiveChar();
+      if (text && ch) {
+        ensureVoices().then(function() {
+          playVoiceMessage(voiceEl, text, ch);
+        });
+      }
+    }
   });
 
   document.getElementById('btnSend').addEventListener('click', sendMessage);
