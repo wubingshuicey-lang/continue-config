@@ -15,8 +15,7 @@ const state = {
   jealous: 0,
 
   week: 1,
-  actionPoints: 5,
-  maxAP: 5,
+  msgCount: 0,          // 本周已发消息数
 
   chatHistory: [],   // { role: 'player'|'target'|'narrator', text, week }
   apiMessages: [],   // LLM 上下文（只有 target 和 player，不含 narrator）
@@ -55,8 +54,7 @@ function updateStatsUI() {
   document.getElementById('stageLabel').textContent = stage.name;
   document.getElementById('targetName').textContent = state.targetName;
   document.getElementById('weekLabel').textContent = `第 ${state.week} 周`;
-  document.getElementById('actionDots').textContent =
-    '●'.repeat(state.actionPoints) + '○'.repeat(state.maxAP - state.actionPoints);
+  document.getElementById('actionDots').textContent = `本周 ${state.msgCount} 条消息`;
 }
 
 function scrollChat() {
@@ -140,7 +138,7 @@ ${getPaceRules()}
   数值范围-10到+10。这个标记会被系统解析，不会显示给玩家。
 
 ## 当前时间
-第${state.week}周，本周剩余行动点：${state.actionPoints}
+第${state.week}周。你可以自由对话，不受行动点限制。本周已发${state.msgCount}条消息。
 
 ## 重要提醒
 - 你有自己的工作和生活，你会忙、会累、可能回复慢
@@ -327,7 +325,7 @@ function parseAndApplyStats(text) {
 async function sendMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
-  if (!text || state.actionPoints <= 0) return;
+  if (!text) return;
 
   input.value = '';
   input.style.height = 'auto';
@@ -335,8 +333,8 @@ async function sendMessage() {
   // 显示玩家消息
   addChatMessage('player', text);
 
-  // 消耗行动点
-  state.actionPoints--;
+  // 本周消息计数
+  state.msgCount++;
   updateStatsUI();
 
   // 检查 API 配置
@@ -366,7 +364,6 @@ async function sendMessage() {
 
     updateStatsUI();
     checkStageUp();
-    checkAPDepleted();
     saveGame();
   } catch (err) {
     showTyping(false);
@@ -386,20 +383,11 @@ function checkStageUp() {
   badge.dataset.prevStage = stage.name;
 }
 
-function checkAPDepleted() {
-  if (state.actionPoints <= 0) {
-    setTimeout(() => {
-      addChatMessage('narrator', '本周行动点已用完。点击左侧「推进到下一周」继续。');
-    }, 600);
-  }
-}
-
 // ==================== 周推进 ====================
 function advanceWeek() {
   const stage = getStage();
-  const events = state.chatHistory.filter(h => h.week === state.week);
-  const summary = events.length > 0
-    ? `本周你和${state.targetName}之间有${events.length}次交流。关系阶段：${stage.name}。`
+  const summary = state.msgCount > 0
+    ? `本周你和${state.targetName}之间交换了${state.msgCount}条消息。关系阶段：${stage.name}。`
     : `平淡的一周过去了。`;
 
   state.weeklySummaries.push({
@@ -412,13 +400,13 @@ function advanceWeek() {
   addChatMessage('narrator', `—— 第 ${state.week} 周结束 ——\n${summary}`);
 
   state.week++;
-  state.actionPoints = state.maxAP;
+  state.msgCount = 0;
   state.eventLog = [];
 
   updateStatsUI();
 
   setTimeout(() => {
-    addChatMessage('narrator', `—— 第 ${state.week} 周 ——\n新的一周开始了。早晨的阳光透过窗帘照进来，又是新的一天。`);
+    addChatMessage('narrator', `—— 第 ${state.week} 周 ——\n新的一周开始了。`);
     document.getElementById('chatInput').focus();
   }, 500);
 
@@ -578,7 +566,7 @@ function setupApiModal() {
 
     try {
       // 发送简单测试
-      const testState = { ...state, targetName: '测试角色', targetJob: '医生', playerName: '测试', playerJob: '设计师', favor: 5, familiar: 0, heart: 0, depend: 0, jealous: 0, week: 1, actionPoints: 5, paceStyle: 'slow', apiMessages: [] };
+      const testState = { ...state, targetName: '测试角色', targetJob: '医生', playerName: '测试', playerJob: '设计师', favor: 5, familiar: 0, heart: 0, depend: 0, jealous: 0, week: 1, paceStyle: 'slow', apiMessages: [] };
 
       const origState = { ...state };
       Object.assign(state, testState);
@@ -679,9 +667,7 @@ function restoreGameUI() {
     if (h.week === state.week) addChatMessage(h.role, h.text);
   });
 
-  if (state.actionPoints > 0) {
-    addChatMessage('narrator', `欢迎回来，${state.playerName}。—— 第 ${state.week} 周，剩余 ${state.actionPoints} 个行动点`);
-  }
+  addChatMessage('narrator', `欢迎回来，${state.playerName}。—— 第 ${state.week} 周`);
   document.getElementById('chatInput').focus();
 }
 
