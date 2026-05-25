@@ -406,7 +406,8 @@
       "createdAt": 1779691770132,
       "_readNoReply": false,
       "_readNoReplyTime": 1779692048019,
-      "_lastPlayerMsg": "快点过来 你硬了吧"
+      "_lastPlayerMsg": "快点过来 你硬了吧",
+      "completedScenarios": []
     },
     "id_1779698986183_9okg": {
       "id": "id_1779698986183_9okg",
@@ -1312,7 +1313,8 @@
       ],
       "eventLog": [],
       "createdAt": 1779698986183,
-      "_readNoReply": false
+      "_readNoReply": false,
+      "completedScenarios": []
     }
   },
   "charOrder": [

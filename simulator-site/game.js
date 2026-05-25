@@ -1345,6 +1345,17 @@ function loadFromJSON(jsonStr) {
   const gExists = state.groupChats.some(g => g.id === data.activeGroupId);
   state.activeGroupId = gExists ? data.activeGroupId : null;
   state.lastActiveTime = data.lastActiveTime || data.savedAt || Date.now();
+
+  // 兼容旧存档：确保所有角色有新增字段的默认值
+  Object.values(state.characters).forEach(ch => {
+    ch.completedScenarios = ch.completedScenarios || [];
+    ch.eventLog = ch.eventLog || [];
+    ch.kinks = ch.kinks || [];
+    ch.persona = ch.persona || '';
+    ch.chatHistory = ch.chatHistory || [];
+    if (!ch.createdAt) ch.createdAt = Date.now();
+  });
+
   if (!state.activeGroupId && !state.characters[state.activeCharId]) {
     state.activeCharId = state.charOrder[0] || null;
   }
@@ -1771,14 +1782,14 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         loadFromJSON(raw);
         localStorage.setItem(SAVE_KEY, raw);
-        addSystemMessage('📤 存档已导入成功！');
         document.getElementById('landingPage').classList.add('hidden');
         document.getElementById('createScreen').classList.add('hidden');
         document.getElementById('gameScreen').classList.remove('hidden');
         initGameUI();
+        addSystemMessage('📤 存档已导入成功！');
       } catch (err) {
-        addSystemMessage('❌ 导入失败：' + err.message);
         console.error(err);
+        alert('导入失败：' + err.message);
       }
     };
     reader.readAsText(file);
