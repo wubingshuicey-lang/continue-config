@@ -500,12 +500,12 @@ ${modeInstructions}
 [ACTION]你此刻的身体动作、正在做什么[/ACTION]
 [STATS:好感变化,熟悉度变化,心动值变化,依赖值变化,吃醋值变化]
 
+可选标签（偶尔用，不要太频繁）：
+[IMG]图片场景描述（如：桌上的咖啡、窗外的夕阳、我的猫）[/IMG]
+[STICKER]表情包描述（如：猫猫捂脸、小狗摇头、无语白眼）[/STICKER]
+
 范例：
 [MSG]刚下班，累死了。你在干嘛？[/MSG]
-[THOUGHT]今天手术站了八个小时，腿都麻了，但不知道为什么就是想跟她说句话。她会不会觉得我烦？[/THOUGHT]
-[EXPRESSION]疲惫但看到手机嘴角微微上扬[/EXPRESSION]
-[ACTION]靠在沙发上，一只手揉着太阳穴，另一只手拿着手机[/ACTION]
-[STATS:2,1,1,0,0]
 
 - 用你自己的语气说话，像真人聊天一样自然
 - 该短就短，该长就长
@@ -608,22 +608,31 @@ function parseReply(text) {
   const thoughtMatch = text.match(/\[THOUGHT\]([\s\S]*?)\[\/THOUGHT\]/i);
   const exprMatch = text.match(/\[EXPRESSION\]([\s\S]*?)\[\/EXPRESSION\]/i);
   const actionMatch = text.match(/\[ACTION\]([\s\S]*?)\[\/ACTION\]/i);
+  const imgMatch = text.match(/\[IMG\]([\s\S]*?)\[\/IMG\]/i);
+  const stickerMatch = text.match(/\[STICKER\]([\s\S]*?)\[\/STICKER\]/i);
 
   let msg = text;
   if (msgMatch) msg = msgMatch[1].trim();
 
-  // 如果没有匹配到任何标签，整段作为对话（兼容旧格式）
   const result = {
     msg: msg || text,
     thought: thoughtMatch ? thoughtMatch[1].trim() : '',
     expression: exprMatch ? exprMatch[1].trim() : '',
     action: actionMatch ? actionMatch[1].trim() : '',
+    img: imgMatch ? imgMatch[1].trim() : '',
+    sticker: stickerMatch ? stickerMatch[1].trim() : '',
   };
 
-  // 标记是否遵循了格式
   result.hasFormat = !!(msgMatch || thoughtMatch || exprMatch || actionMatch);
 
   return result;
+}
+
+// 将 AI 的描述转为真实图片 URL
+function imageFromDesc(desc) {
+  const keyword = encodeURIComponent(desc.slice(0, 30));
+  // picsum: 基于关键词种子的稳定随机图
+  return `https://picsum.photos/seed/${keyword}/400/300`;
 }
 
 function parseStats(text) {
@@ -793,6 +802,13 @@ async function sendMessage() {
       const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
       addMessage('target', cleanMsg, extra);
 
+      if (parsed.img) {
+        addMessage('target', imageFromDesc(parsed.img), null, null, 'image');
+      }
+      if (parsed.sticker) {
+        addMessage('target', parsed.sticker, null, null, 'sticker');
+      }
+
       ch.apiMessages.push({ role: 'user', content: text });
       ch.apiMessages.push({ role: 'assistant', content: reply });
       ch.chatHistory.push({ role: 'player', text, week: ch.week });
@@ -841,6 +857,15 @@ async function sendMessage() {
 
     const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
     addMessage('target', cleanMsg, extra);
+
+    // 如果 AI 发了图片/表情包
+    if (parsed.img) {
+      const imgUrl = imageFromDesc(parsed.img);
+      addMessage('target', imgUrl, null, null, 'image');
+    }
+    if (parsed.sticker) {
+      addMessage('target', parsed.sticker, null, null, 'sticker');
+    }
 
     ch.apiMessages.push({ role: 'user', content: text });
     ch.apiMessages.push({ role: 'assistant', content: reply });
@@ -903,6 +928,14 @@ async function sendGroupMessage(text) {
 
       const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
       addMessage('target', cleanMsg, extra, ch.targetName);
+
+      if (parsed.img) {
+        addMessage('target', imageFromDesc(parsed.img), null, ch.targetName, 'image');
+      }
+      if (parsed.sticker) {
+        addMessage('target', parsed.sticker, null, ch.targetName, 'sticker');
+      }
+
       ch.msgCount++;
       ch.chatHistory.push({ role: 'target', text: cleanMsg, extra, week: ch.week });
 
@@ -1006,6 +1039,14 @@ async function proactiveMessage() {
 
     const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
     addMessage('target', cleanMsg, extra);
+
+    if (parsed.img) {
+      addMessage('target', imageFromDesc(parsed.img), null, null, 'image');
+    }
+    if (parsed.sticker) {
+      addMessage('target', parsed.sticker, null, null, 'sticker');
+    }
+
     ch.msgCount++;
     ch.apiMessages.push({ role: 'user', content: userPrompt });
     ch.apiMessages.push({ role: 'assistant', content: reply });
@@ -1556,14 +1597,23 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
+      const raw = e.target.result;
       try {
-        loadFromJSON(e.target.result);
-        localStorage.setItem(SAVE_KEY, e.target.result);
-        addSystemMessage('📤 存档已导入，刷新页面后生效');
+        // 先验证 JSON 格式
+        JSON.parse(raw);
+      } catch (err) {
+        addSystemMessage('❌ 文件不是有效的 JSON 格式');
+        this.value = '';
+        return;
+      }
+
+      try {
+        loadFromJSON(raw);
+        localStorage.setItem(SAVE_KEY, raw);
+        addSystemMessage('📤 存档已导入成功！刷新页面即可看到角色');
         updateStatsFloat();
         updateCharDropdown();
 
-        // 重新渲染聊天
         const ch = getActiveChar();
         const msgs = document.getElementById('chatMessages');
         msgs.innerHTML = '';
@@ -1574,7 +1624,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         saveGame();
       } catch (err) {
-        addSystemMessage('❌ 导入失败：存档文件格式错误');
+        addSystemMessage('❌ 导入失败：' + err.message);
+        console.error(err);
       }
     };
     reader.readAsText(file);
