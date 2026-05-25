@@ -12,7 +12,7 @@ const state = {
   gameTime: { timestamp: Date.now() },  // 真实时间戳
   groupChats: [],       // [{ id, members[], messages[] }]
   activeGroupId: null,
-  lastActiveTick: Date.now(),
+  lastActiveTime: Date.now(),
   proactiveInterval: null,
   timeTicker: null,     // 实时时钟
 };
@@ -116,6 +116,10 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function updateActiveTime() {
+  state.lastActiveTime = Date.now();
 }
 
 // ==================== 时间系统（真实时间） ====================
@@ -698,6 +702,8 @@ async function sendMessage() {
   const ch = getActiveChar();
   if (!ch) return;
 
+  updateActiveTime();
+
   // 打断：如果对方正在输入，取消上一次回复
   if (!document.getElementById('chatTyping').classList.contains('hidden')) {
     _replyGate++;
@@ -1081,6 +1087,157 @@ function startProactiveTimer() {
   scheduleNext();
 }
 
+// ==================== 离线消息追赶 ====================
+const OFFLINE_MSGS = {
+  // 凌晨 0-6
+  late_night: {
+    '陌生': ['还没睡…你是？', '半夜三更的，怎么会有消息提示'],
+    '认识': ['这么晚还没睡？', '失眠了，正好看到通讯录里有你'],
+    '朋友': ['你睡了吗？我失眠了…', '大半夜的突然想到你', '刚看完一部电影，睡不着'],
+    '暧昧': ['睡着了吗…突然很想你', '做了个梦醒了，梦到你了', '半夜醒过来第一个想到的就是你'],
+    '恋爱': ['醒了，身边空空的…想你了', '梦到你不在，吓醒的，还好你还在', '宝贝睡了吗…我好想你', '翻来覆去睡不着，想你'],
+  },
+  // 早上 6-10
+  morning: {
+    '陌生': ['早，刚加的好友，打个招呼', '早上好'],
+    '认识': ['早啊，今天好冷', '早！今天有安排吗', '早，今天课多/会多，好烦'],
+    '朋友': ['早啊，吃早餐了没', '今天阳光好好，心情也不错', '早！我在地铁上，好挤…', '今天好冷，多穿点'],
+    '暧昧': ['早啊，梦到你了', '早…昨天梦到你，今天都不敢直视你了', '早早早，今天有空吗？想约你', '早，发了张窗外照片给你看'],
+    '恋爱': ['宝贝早，梦到你了', '早啊，你今天几点起？我醒了就想给你发消息', '早，给你买了早餐/咖啡', '早安，好想亲你一下'],
+  },
+  // 白天 10-17
+  daytime: {
+    '陌生': ['你好，在忙吗？', '今天好忙…'],
+    '认识': ['午饭吃了没', '今天好忙，偷空给你发消息', '看到一只猫，想起你之前说喜欢猫'],
+    '朋友': ['午饭吃了吗？别饿着', '下午好困…来杯咖啡吗', '今天工作/上课上一半了，累死了', '刚看到个好玩的东西，发给你看'],
+    '暧昧': ['在干嘛？我在想你', '看到个东西觉得好适合你', '今天心情怎么样？累不累', '我下午没事，要不要出来？'],
+    '恋爱': ['在干嘛，想你了', '午饭吃了没，给你点了外卖', '今天累不累，下班/下课我去接你', '下午没课，想你了来找你'],
+  },
+  // 傍晚 17-20
+  evening: {
+    '陌生': ['下班了没', '今天过得怎么样'],
+    '认识': ['下班了没？今天好长', '晚上吃啥？我纠结半天了', '忙完了，终于可以喘口气'],
+    '朋友': ['下班！你今天累不累', '晚上有空一起吃饭？', '刚健身完，累但爽', '你晚上吃什么？不要又吃泡面'],
+    '暧昧': ['下班了吗，想你了', '晚上有空吗？想见你', '今天一天都在想你', '晚上约你吃饭，行不行'],
+    '恋爱': ['宝贝下班没？我饿了想你', '晚上我做饭/我请你吃饭', '下班了，最想见你', '今天一整天都在想你'],
+  },
+  // 晚上 20-24
+  night: {
+    '陌生': ['晚上好，打扰了'],
+    '认识': ['晚上好，看你在线上', '今天忙完，终于躺下了'],
+    '朋友': ['今晚月亮好圆', '在干嘛？我刚打完游戏', '晚上太安静了，找你聊聊天'],
+    '暧昧': ['晚上好安静…想你了', '在干嘛？我刚洗完澡，听着歌想到你', '睡不着，有点想你', '晚上最适合偷偷想你了'],
+    '恋爱': ['洗好澡了，想你了', '今晚能视频吗', '想问你今天都干嘛了，想听你的声音', '晚安宝贝，梦到我'],
+  },
+};
+
+function getTimeBucket() {
+  const h = new Date(state.gameTime.timestamp).getHours();
+  if (h < 6) return 'late_night';
+  if (h < 10) return 'morning';
+  if (h < 17) return 'daytime';
+  if (h < 20) return 'evening';
+  return 'night';
+}
+
+function pickOfflineMsg(ch) {
+  const bucket = OFFLINE_MSGS[getTimeBucket()] || OFFLINE_MSGS['daytime'];
+  const stage = getStage(ch);
+  // 越亲密越可能从更高阶段抽消息
+  const pool = bucket[stage] || bucket['认识'];
+  return rpick(pool);
+}
+
+async function catchUpMessages() {
+  const now = Date.now();
+  const elapsed = now - state.lastActiveTime;
+  const elapsedMin = Math.floor(elapsed / 60000);
+
+  if (elapsedMin < 10) {
+    state.lastActiveTime = now;
+    return; // 不到 10 分钟不管
+  }
+
+  state.lastActiveTime = now;
+
+  // 推进游戏时间
+  state.gameTime.timestamp += elapsed;
+
+  const hours = Math.floor(elapsedMin / 60);
+  const mins = elapsedMin % 60;
+  const gapStr = hours > 0
+    ? (hours >= 24 ? `${Math.floor(hours / 24)}天${hours % 24}小时` : `${hours}小时${mins}分钟`)
+    : `${elapsedMin}分钟`;
+
+  addSystemMessage(`⏰ 你离开了 ${gapStr}…`);
+
+  // 给所有角色生成追赶消息
+  for (const charId of state.charOrder) {
+    const ch = state.characters[charId];
+    if (!ch) continue;
+
+    // 消息数量：大约每 30 分钟一条，最多 5 条
+    const count = Math.min(5, Math.max(1, Math.floor(elapsedMin / 30)));
+    const senders = [ch.targetName];
+    const selfMsgPool = [];
+
+    for (let i = 0; i < count; i++) {
+      const msg = pickOfflineMsg(ch);
+      selfMsgPool.push(msg);
+    }
+
+    // 每个角色的消息之间稍有间隔感
+    for (let i = 0; i < selfMsgPool.length; i++) {
+      const msg = selfMsgPool[i];
+      // 消息时间分散在离开时间段内
+      const msgOffset = Math.floor(elapsed * (i / selfMsgPool.length));
+      const savedTs = state.gameTime.timestamp;
+      state.gameTime.timestamp = savedTs - elapsed + msgOffset;
+      updateTimeDisplay();
+
+      const displaySender = charId === state.activeCharId ? null : ch.targetName;
+      addMessage('target', msg, null, displaySender);
+
+      state.gameTime.timestamp = savedTs;
+      ch.msgCount++;
+      ch.chatHistory.push({ role: 'target', text: msg, week: ch.week });
+    }
+
+    // 字符之间短暂延迟，让渲染不卡在一帧
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  updateTimeDisplay();
+  updateStatsFloat();
+  saveGame();
+
+  // 5秒后如果加了 API key，用 AI 再补一条高质量消息
+  if (getApiConfig().apiKey && state.charOrder.length > 0) {
+    setTimeout(async () => {
+      const ch = getActiveChar();
+      if (!ch) return;
+      const trigger = rpick(['突然想你了','刚忙完想跟你说句话','看到你喜欢的东西','今天发生了有趣的事','想问你今天怎么样']);
+      const prompt = `（你刚才给${ch.playerName}发了几条消息，现在再补一条。触发原因：${trigger}。自然简短，回复格式：[MSG]对话[/MSG][THOUGHT]心理[/THOUGHT][EXPRESSION]表情[/EXPRESSION][ACTION]动作[/ACTION]）`;
+      try {
+        const reply = await callApi(prompt, ch);
+        const parsed = parseReply(reply);
+        const { text: cleanMsg, stats } = parseStats(parsed.msg);
+        if (stats) {
+          const keys = ['favor','familiar','heart','depend','jealous'];
+          keys.forEach((k, i) => { if (!isNaN(stats[i])) ch[k] = clamp(ch[k] + stats[i], 0, 100); });
+        }
+        const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
+        addMessage('target', cleanMsg, extra);
+        ch.msgCount++;
+        ch.chatHistory.push({ role: 'target', text: cleanMsg, extra, week: ch.week });
+        postMessageProcess(ch, cleanMsg);
+        updateStatsFloat();
+        saveGame();
+      } catch(e) {}
+    }, 5000);
+  }
+}
+
 // ==================== 周推进 ====================
 function advanceWeek() {
   const ch = getActiveChar();
@@ -1153,6 +1310,7 @@ function saveGame() {
     gameTime: state.gameTime,
     groupChats: state.groupChats,
     activeGroupId: state.activeGroupId,
+    lastActiveTime: state.lastActiveTime,
     savedAt: Date.now(),
   };
 
@@ -1186,6 +1344,7 @@ function loadFromJSON(jsonStr) {
   state.groupChats = data.groupChats || [];
   const gExists = state.groupChats.some(g => g.id === data.activeGroupId);
   state.activeGroupId = gExists ? data.activeGroupId : null;
+  state.lastActiveTime = data.lastActiveTime || data.savedAt || Date.now();
   if (!state.activeGroupId && !state.characters[state.activeCharId]) {
     state.activeCharId = state.charOrder[0] || null;
   }
@@ -1381,6 +1540,9 @@ function initGameUI() {
 
   document.getElementById('chatInput').focus();
   startProactiveTimer();
+
+  // 追赶离线消息
+  setTimeout(() => catchUpMessages(), 800);
 }
 
 // ==================== 事件绑定 ====================
@@ -1729,4 +1891,19 @@ function setupApiModal() {
   }
 })();
 
-window.addEventListener('beforeunload', () => { if (state.charOrder.length > 0) saveGame(); });
+window.addEventListener('beforeunload', () => {
+  if (state.charOrder.length > 0) {
+    state.lastActiveTime = Date.now();
+    saveGame();
+  }
+});
+
+// 标签页切换：切回来时追赶离线消息
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.charOrder.length > 0 && state.activeCharId) {
+    setTimeout(() => catchUpMessages(), 500);
+  }
+  if (document.hidden && state.charOrder.length > 0) {
+    state.lastActiveTime = Date.now();
+  }
+});
