@@ -2,8 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>梦女模拟器</title>
+  <meta name="description" content="一个他在意你、会主动找你、会吃醋、会已读不回的恋爱模拟游戏">
+  <meta name="theme-color" content="#0a0e17" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2ede8" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="梦女模拟器">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,6 +26,7 @@
         <a href="#" id="navNewGame">新游戏</a>
         <a href="#" id="navContinue">继续游戏</a>
         <a href="#" id="navImport">导入存档</a>
+        <button class="lang-toggle" id="langToggle1" aria-label="切换语言">中/EN</button>
         <button class="theme-toggle" id="themeToggle" aria-label="切换深浅模式">
           <span class="toggle-icon">☾</span>
         </button>
@@ -26,26 +35,29 @@
 
     <section class="hero">
       <div class="glass-card hero-card">
-        <p class="subtitle">一个属于你的故事</p>
+        <p class="subtitle">夜深了，打开手机</p>
         <h1>梦女模拟器</h1>
         <p class="desc">
-          创建你的角色，在现实都市中慢慢靠近一个人<br>
-          他会主动找你、会忙、会吃醋<br>
-          像真人一样，用他的语气跟你聊天
+          在深夜的屏幕对面，有一个人<br>
+          他会想你、会主动、会吃醋、会已读不回<br>
+          像真人一样，用他的方式跟你聊天
         </p>
         <button class="btn-start" id="btnStartGame">开始新游戏</button>
       </div>
     </section>
 
-    <section class="features">
-      <div class="glass-card feature-card"><div class="card-icon">✧</div><h3>他主动找你</h3><p>他会在意你、会主动发消息<br>会问你在干嘛、会记得你说过的话</p></div>
-      <div class="glass-card feature-card"><div class="card-icon">◈</div><h3>自由切换角色</h3><p>创建多个攻略对象<br>不同时间跟不同的人聊天</p></div>
-      <div class="glass-card feature-card"><div class="card-icon">◆</div><h3>网聊 + 见面</h3><p>切换线上聊天和线下见面模式<br>见面时动作和场景自然融入</p></div>
+    <section class="char-entries" id="charEntries">
+      <div class="chat-list-header">
+        <h2 class="entries-title">消息</h2>
+        <button class="add-chat-btn" id="btnAddChat" title="新对话">＋</button>
+      </div>
+      <div class="chat-list" id="chatList">
+        <!-- 由 game.js 动态渲染 -->
+      </div>
+      <div class="entries-empty hidden" id="entriesEmpty">
+        <p>还没有对话，创建第一个故事吧</p>
+      </div>
     </section>
-
-    <footer class="glass-footer">
-      <p>存档进度 · 角色收藏 · 群聊模式 · 时间流逝</p>
-    </footer>
   </div>
 
   <!-- ====== 角色创建 ====== -->
@@ -193,7 +205,9 @@
         <button class="icon-btn" id="btnExport" title="导出存档">📥</button>
         <button class="icon-btn" id="btnImport" title="导入存档">📤</button>
         <button class="icon-btn" id="btnSync" title="云端同步">🔄</button>
+        <button class="icon-btn" id="btnSound" title="音效">🔔</button>
         <button class="icon-btn" id="btnSettings" title="API 设置">⚙</button>
+        <button class="lang-toggle" id="langToggle2" aria-label="切换语言">中/EN</button>
         <button class="theme-toggle" id="themeToggle2"><span class="toggle-icon">☾</span></button>
         <input type="file" id="importFileInput" accept=".json" style="display:none">
       </div>
@@ -208,7 +222,7 @@
 
     <div class="game-main">
       <!-- 聊天区 -->
-      <div class="chat-area glass-card" id="chatArea">
+      <div class="chat-area glass-card reveal-stagger" id="chatArea">
         <div class="chat-mode-badge" id="chatModeBadge">📱 网聊模式</div>
         <div class="chat-messages" id="chatMessages"><div class="chat-hint">故事即将开始…</div></div>
         <div class="chat-typing hidden" id="chatTyping">
@@ -228,12 +242,14 @@
     </div>
 
     <!-- 浮动数值面板(可收起) -->
-    <div class="stats-float glass-card" id="statsFloat">
+    <div class="stats-float glass-card reveal-stagger" id="statsFloat">
       <div class="stats-float-header" id="statsFloatHeader">
         <span id="statsFloatName">攻略对象</span>
         <span class="stats-toggle-icon">▼</span>
       </div>
       <div class="stats-float-body" id="statsFloatBody">
+        <div class="stat-mini mood-row"><span>心情</span><span class="mood-emoji" id="moodEmoji">😐</span></div>
+        <div class="stat-mini energy-row"><span>精力</span><span class="energy-label" id="energyLabel">正常</span></div>
         <div class="stat-mini"><span>好感</span><div class="stat-bar"><div class="stat-fill" id="statFavor"></div></div></div>
         <div class="stat-mini"><span>熟悉</span><div class="stat-bar"><div class="stat-fill familiar" id="statFamiliar"></div></div></div>
         <div class="stat-mini"><span>心动</span><div class="stat-bar"><div class="stat-fill heart" id="statHeart"></div></div></div>
@@ -254,6 +270,7 @@
         <label>模型平台</label>
         <div class="choice-grid" id="apiProvider">
           <button class="glass-chip selected" data-value="deepseek">DeepSeek</button>
+          <button class="glass-chip" data-value="grok">Grok</button>
           <button class="glass-chip" data-value="openai">OpenAI</button>
           <button class="glass-chip" data-value="gemini">Gemini</button>
           <button class="glass-chip" data-value="claude">Claude</button>
@@ -262,6 +279,8 @@
       <div class="create-section"><label>API Key</label><input type="password" class="glass-input" id="apiKey" placeholder="sk-…"></div>
       <div class="create-section"><label>API 地址（可选）</label><input type="text" class="glass-input" id="apiBase" placeholder="默认地址"></div>
       <div class="create-section"><label>模型名称（可选）</label><input type="text" class="glass-input" id="apiModel" placeholder="默认模型"></div>
+      <div class="create-section"><label>云同步 · Supabase URL</label><input type="text" class="glass-input" id="supabaseUrl" placeholder="https://xxxxx.supabase.co"></div>
+      <div class="create-section"><label>云同步 · Supabase Key</label><input type="password" class="glass-input" id="supabaseKey" placeholder="anon key…"></div>
       <div class="modal-buttons">
         <button class="choice-btn" id="btnTestApi">测试连接</button>
         <button class="btn-start" id="btnSaveApi">保存设置</button>
@@ -280,7 +299,14 @@
     </div>
   </div>
 
-  <script src="script.js?v=5"></script>
-  <script src="game.js?v=5"></script>
+  <script src="script.js?v=6"></script>
+  <script src="sounds.js?v=1"></script>
+  <script src="lang.js?v=1"></script>
+  <script src="game.js?v=7"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(function(){});
+    }
+  </script>
 </body>
 </html>

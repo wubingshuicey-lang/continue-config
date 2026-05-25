@@ -1,0 +1,15 @@
+{
+  "name": "梦女模拟器",
+  "short_name": "梦女",
+  "description": "一个他在意你、会主动找你、会吃醋、会已读不回的恋爱模拟游戏",
+  "start_url": "/docs/index.html",
+  "scope": "/docs/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5efe4",
+  "theme_color": "#b8976e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
