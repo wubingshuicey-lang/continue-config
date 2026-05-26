@@ -600,6 +600,15 @@ html[data-theme="light"] .msg-voice.playing { background: rgba(120,120,120,0.06)
   box-shadow: 0 0.5px 0.5px 0 rgba(255,255,255,0.04) inset;
 }
 .input-tool-btn:hover { color: var(--text-primary); border-color: var(--border-strong); }
+.input-tool-btn.listening {
+  color: #e84040; background: rgba(232,64,64,0.12);
+  border-color: rgba(232,64,64,0.3);
+  animation: listenPulse 1.2s ease-in-out infinite;
+}
+@keyframes listenPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,64,64,0.25); }
+  50% { box-shadow: 0 0 0 8px rgba(232,64,64,0); }
+}
 .chat-input {
   flex: 1; padding: 9px 14px; font-size: 0.84rem;
   background: rgba(20,22,28,0.5); border: 1px solid var(--border-strong);

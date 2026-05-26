@@ -1016,6 +1016,13 @@ function buildSystemPrompt(ch) {
     '## 输出格式\n每条回复都要包含这些标签：\n' +
     '[MSG]你的对话[/MSG]\n[THOUGHT]你此刻真实的内心活动[/THOUGHT]\n[EXPRESSION]你的表情[/EXPRESSION]\n[ACTION]你的身体动作/正在做的事[/ACTION]\n[STATS:好感变化,熟悉变化,心动变化,依赖变化,吃醋变化]\n\n' +
     'STATS范围-10到+10。变化要合理——日常聊天不会每条都+5+8。大部分时候变化是0~2。\n\n' +
+    '**发送语音消息**\n' +
+    '- 如果你想发语音而不是打字，把 [MSG] 换成 [VOICE] 标签。\n' +
+    '- [VOICE]标签里的内容会被朗读出来给对方听。\n' +
+    '- 适合发语音的场景：不方便打字时、想撒娇时、说的内容比较长时、深夜想听对方声音时、情绪激动时。\n' +
+    '- 语音消息应该比文字更口语化、更像在说话——"喂""嗯…""那个…""就是…"这些口语词在语音里很自然。\n' +
+    '- 每5-10条消息里最多1条语音——太多了烦人。\n' +
+    '- 例：[VOICE]（3秒停顿）喂…刚到家。今天好累啊。你在干嘛呢[/VOICE]\n\n' +
     '偶尔用（3-5条消息才用一次）：\n[IMG]看到的东西/场景[/IMG]\n[STICKER]表情包描述[/STICKER]\n\n' +
     '## 铁律\n' +
     '- 你就是' + ch.targetName + '本人。死也不能说"作为AI""我不能继续""换个话题""我们来聊聊别的"。\n' +
@@ -1140,18 +1147,22 @@ async function callApi(userMessage, ch) {
 }
 
 function parseReply(text) {
-  const msgMatch = text.match(/\[MSG\]([\s\S]*?)\[\/MSG\]/i);
-  const thoughtMatch = text.match(/\[THOUGHT\]([\s\S]*?)\[\/THOUGHT\]/i);
-  const exprMatch = text.match(/\[EXPRESSION\]([\s\S]*?)\[\/EXPRESSION\]/i);
-  const actionMatch = text.match(/\[ACTION\]([\s\S]*?)\[\/ACTION\]/i);
-  const imgMatch = text.match(/\[IMG\]([\s\S]*?)\[\/IMG\]/i);
-  const stickerMatch = text.match(/\[STICKER\]([\s\S]*?)\[\/STICKER\]/i);
+  var voiceMatch = text.match(/\[VOICE\]([\s\S]*?)\[\/VOICE\]/i);
+  var msgMatch = text.match(/\[MSG\]([\s\S]*?)\[\/MSG\]/i);
+  var thoughtMatch = text.match(/\[THOUGHT\]([\s\S]*?)\[\/THOUGHT\]/i);
+  var exprMatch = text.match(/\[EXPRESSION\]([\s\S]*?)\[\/EXPRESSION\]/i);
+  var actionMatch = text.match(/\[ACTION\]([\s\S]*?)\[\/ACTION\]/i);
+  var imgMatch = text.match(/\[IMG\]([\s\S]*?)\[\/IMG\]/i);
+  var stickerMatch = text.match(/\[STICKER\]([\s\S]*?)\[\/STICKER\]/i);
 
-  let msg = text;
-  if (msgMatch) msg = msgMatch[1].trim();
+  var msg = text;
+  var isVoice = false;
+  if (voiceMatch) { msg = voiceMatch[1].trim(); isVoice = true; }
+  else if (msgMatch) msg = msgMatch[1].trim();
 
-  const result = {
+  var result = {
     msg: msg || text,
+    isVoice: isVoice,
     thought: thoughtMatch ? thoughtMatch[1].trim() : '',
     expression: exprMatch ? exprMatch[1].trim() : '',
     action: actionMatch ? actionMatch[1].trim() : '',
@@ -1159,7 +1170,7 @@ function parseReply(text) {
     sticker: stickerMatch ? stickerMatch[1].trim() : '',
   };
 
-  result.hasFormat = !!(msgMatch || thoughtMatch || exprMatch || actionMatch);
+  result.hasFormat = !!(voiceMatch || msgMatch || thoughtMatch || exprMatch || actionMatch);
 
   return result;
 }
@@ -1288,18 +1299,91 @@ function ensureVoices() {
   });
 }
 
+// ==================== 语音输入（STT） ====================
+var _recognition = null;
+var _isListening = false;
+
+function initSpeechRecognition() {
+  if (_recognition) return;
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    _recognition = null;
+    return;
+  }
+  _recognition = new SpeechRecognition();
+  _recognition.continuous = true;
+  _recognition.interimResults = true;
+  _recognition.lang = 'zh-CN';
+
+  _recognition.onresult = function(event) {
+    var transcript = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    var input = document.getElementById('chatInput');
+    if (input) {
+      input.value = transcript;
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+    }
+  };
+
+  _recognition.onerror = function(event) {
+    console.log('Speech recognition error:', event.error);
+    stopListening();
+  };
+
+  _recognition.onend = function() {
+    stopListening();
+  };
+}
+
+function startListening() {
+  if (!_recognition) initSpeechRecognition();
+  if (!_recognition) {
+    alert('你的浏览器不支持语音输入。请使用 Chrome 浏览器。');
+    return;
+  }
+  try {
+    _recognition.start();
+    _isListening = true;
+    var btn = document.getElementById('btnVoice');
+    if (btn) { btn.textContent = '🎙️'; btn.classList.add('listening'); }
+    var input = document.getElementById('chatInput');
+    if (input) input.placeholder = '正在聆听…';
+  } catch(e) {
+    _isListening = false;
+  }
+}
+
+function stopListening() {
+  if (_recognition && _isListening) {
+    try { _recognition.stop(); } catch(e) {}
+  }
+  _isListening = false;
+  var btn = document.getElementById('btnVoice');
+  if (btn) { btn.textContent = '🎤'; btn.classList.remove('listening'); }
+  var input = document.getElementById('chatInput');
+  if (input) input.placeholder = t('chatPlaceholder') || '输入消息…';
+}
+
 function sendVoiceMessage() {
+  // 点击🎤：开始/停止语音输入
+  if (_isListening) {
+    stopListening();
+    // 停止后自动发送输入框中的文字（如果有的话）
+    var input = document.getElementById('chatInput');
+    if (input && input.value.trim()) {
+      setTimeout(function() { sendMessage(); }, 100);
+    }
+    return;
+  }
+
   var ch = getActiveChar();
   if (!ch && !state.activeGroupId) { alert('请先选择角色'); return; }
 
-  advanceTime(1 + Math.floor(Math.random() * 2));
-  addMessage('player', '', null, null, 'voice');
-  if (ch) {
-    ch.msgCount++;
-    ch.chatHistory.push({ role: 'player', text: '', extra: null, week: ch.week, msgType: 'voice' });
-  }
-  updateStatsFloat();
-  saveGame();
+  // 开启语音识别
+  startListening();
 }
 
 // ==================== 真实延迟回复（支持打断） ====================
@@ -1479,7 +1563,8 @@ async function sendMessage() {
       }
 
       const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
-      addMessage('target', cleanMsg, extra);
+      const msgType = parsed.isVoice ? 'voice' : 'text';
+      addMessage('target', cleanMsg, extra, null, msgType);
 
       if (parsed.img) {
         addMessage('target', imageFromDesc(parsed.img), null, null, 'image');
@@ -1491,7 +1576,7 @@ async function sendMessage() {
       ch.apiMessages.push({ role: 'user', content: text });
       ch.apiMessages.push({ role: 'assistant', content: reply });
       ch.chatHistory.push({ role: 'player', text, week: ch.week });
-      pushTargetMessage(ch, { role: 'target', text: cleanMsg, extra, week: ch.week });
+      pushTargetMessage(ch, { role: 'target', text: cleanMsg, extra, week: ch.week, msgType: msgType });
 
       ch._readNoReply = false;
       postMessageProcess(ch, cleanMsg);
@@ -1536,12 +1621,13 @@ async function sendMessage() {
       keys.forEach((k, i) => { if (!isNaN(stats[i])) ch[k] = clamp(ch[k] + stats[i], 0, 100); });
     }
 
-    const extra = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
-    addMessage('target', cleanMsg, extra);
+    var extra2 = { thought: parsed.thought, expression: parsed.expression, action: parsed.action };
+    var msgType2 = parsed.isVoice ? 'voice' : 'text';
+    addMessage('target', cleanMsg, extra2, null, msgType2);
 
     // 如果 AI 发了图片/表情包
     if (parsed.img) {
-      const imgUrl = imageFromDesc(parsed.img);
+      var imgUrl = imageFromDesc(parsed.img);
       addMessage('target', imgUrl, null, null, 'image');
     }
     if (parsed.sticker) {
@@ -1551,7 +1637,7 @@ async function sendMessage() {
     ch.apiMessages.push({ role: 'user', content: text });
     ch.apiMessages.push({ role: 'assistant', content: reply });
     ch.chatHistory.push({ role: 'player', text, week: ch.week });
-    pushTargetMessage(ch, { role: 'target', text: cleanMsg, extra, week: ch.week });
+    pushTargetMessage(ch, { role: 'target', text: cleanMsg, extra: extra2, week: ch.week, msgType: msgType2 });
 
     ch._readNoReply = false;
     postMessageProcess(ch, cleanMsg);
@@ -2934,6 +3020,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initial UI text refresh
   refreshAllUIText();
+
+  // 预初始化语音识别
+  if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+    setTimeout(function() { initSpeechRecognition(); }, 500);
+  }
 });
 
 // ==================== API 设置弹窗 ====================
